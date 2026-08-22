@@ -11,6 +11,7 @@ class Config:
     provider: str
     workspace_dir: str
     memory_file: str
+    notes_file: str
 
     claude_api_key: str | None
     claude_model: str
@@ -46,6 +47,9 @@ def load_config() -> Config:
         workspace_dir=workspace_dir,
         memory_file=os.environ.get(
             "MEMORY_FILE", os.path.join(workspace_dir, ".history.json")
+        ),
+        notes_file=os.environ.get(
+            "NOTES_FILE", os.path.join(workspace_dir, ".notes.json")
         ),
         claude_api_key=os.environ.get("ANTHROPIC_API_KEY"),
         claude_model=os.environ.get("CLAUDE_MODEL", "claude-opus-5"),

@@ -63,6 +63,13 @@ class Agent:
         print(fallback, end="", flush=True)
         return fallback
 
+    def add_tools(self, new_tools: list[ToolSpec]) -> None:
+        """Register additional tools on an already-running agent (e.g. a
+        skill approved and loaded mid-session via propose_skill)."""
+        for t in new_tools:
+            self.tools_by_name[t.name] = t
+        self.tools = list(self.tools_by_name.values())
+
     def _call_tool(self, name: str, tool_input: dict) -> str:
         tool = self.tools_by_name.get(name)
         if tool is None:
