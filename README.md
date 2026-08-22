@@ -59,6 +59,31 @@ running any code the model generated — the code runs with your OS-level
 permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
 in `.env` to skip the prompt (only if you fully trust the model/provider).
 
+### Roles
+
+`/role` lists the built-in roles and shows which is active; `/role <name>`
+switches (changes only the system prompt going forward — history is kept).
+Set a different starting role with `DEFAULT_ROLE` in `.env`.
+
+| Role | Focus |
+|---|---|
+| `assistant` (default) | General-purpose |
+| `researcher` | Thorough web research, cites sources |
+| `coder` | Writes/runs code to verify itself, terse |
+| `analyst` | Works from real data (documents/code), states assumptions |
+
+Add more in `mini_hermes/roles.py`.
+
+### Skills
+
+Drop a `*.py` file into `SKILLS_DIR` (default `./skills`) defining a
+top-level `TOOLS: list[ToolSpec]` and it's loaded automatically on startup
+— no changes to mini_hermes itself needed. See `skills/example_time.py`
+for the pattern. `/tools` in the CLI lists everything currently loaded,
+built-in and skill-provided alike. A skill file that fails to import is
+skipped with a `[skills] failed to load ...` message — it doesn't take
+down the others.
+
 ### Tools available to the agent
 
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript.
@@ -74,6 +99,8 @@ mini_hermes/
   config.py            # env-based settings, provider selection
   memory.py             # persist/reload conversation history to disk
   compaction.py          # trim old turns once history grows too large
+  roles.py               # built-in system-prompt presets, switchable with /role
+  skills.py               # loads pluggable tools from SKILLS_DIR
   agent.py             # the tool-calling loop
   providers/
     base.py            # provider-neutral message/tool types
@@ -83,6 +110,8 @@ mini_hermes/
   tools/
     web.py, browser.py, documents.py, code_exec.py, delegate.py, registry.py
   cli.py                # REPL entry point
+skills/
+  example_time.py        # example pluggable skill — see Skills above
 ```
 
 Conversation history is kept in a provider-neutral shape and converted to

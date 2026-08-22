@@ -24,6 +24,9 @@ class Config:
     confirm_code_exec: bool
     max_history_turns: int
 
+    default_role: str
+    skills_dir: str
+
     max_turns: int = 15
     max_delegate_depth: int = 2
 
@@ -59,4 +62,6 @@ def load_config() -> Config:
         ),
         confirm_code_exec=_parse_bool(os.environ.get("CONFIRM_CODE_EXEC", "true")),
         max_history_turns=int(os.environ.get("MAX_HISTORY_TURNS", "30")),
+        default_role=os.environ.get("DEFAULT_ROLE", "assistant"),
+        skills_dir=os.environ.get("SKILLS_DIR", "./skills"),
     )
