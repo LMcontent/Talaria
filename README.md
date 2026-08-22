@@ -26,15 +26,29 @@ DNS"/unblocking service) that returns a reachable IP for it. This only
 changes which IP gets dialed for that one host — TLS/SNI still use the real
 hostname, so certificate validation is unaffected.
 
+One-time browser setup (needed for the `browser_fetch` tool):
+
+```bash
+playwright install chromium
+```
+
 ### Run
 
 ```bash
 python -m mini_hermes.cli
 ```
 
+### Memory
+
+Conversation history is saved to `WORKSPACE_DIR/.history.json` after every
+turn and reloaded automatically the next time you start the CLI — you don't
+lose context by closing the terminal. `/reset` clears it (in memory and on
+disk). Override the file location with `MEMORY_FILE` in `.env`.
+
 ### Tools available to the agent
 
-- `web_search`, `web_fetch` — search the internet and read pages (no API key needed, uses DuckDuckGo HTML)
+- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript.
+- `browser_fetch` — open a URL in a real headless Chromium (via Playwright) that executes JavaScript, for sites where `web_fetch` returns empty/garbled content. Slower, and **not a guaranteed bypass** for sites with strong anti-bot protection (e.g. Ozon) — they can still block or serve a challenge page to a headless browser.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet and capture its output (not sandboxed beyond a timeout — only use with a model/provider you trust)
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
@@ -44,13 +58,15 @@ python -m mini_hermes.cli
 ```
 mini_hermes/
   config.py            # env-based settings, provider selection
+  memory.py             # persist/reload conversation history to disk
   agent.py             # the tool-calling loop
   providers/
     base.py            # provider-neutral message/tool types
     claude.py           # Anthropic backend
     openai_compat.py    # OpenAI-compatible router backend
+    dns_pin.py           # optional DNS pinning for blocked regions
   tools/
-    web.py, documents.py, code_exec.py, delegate.py, registry.py
+    web.py, browser.py, documents.py, code_exec.py, delegate.py, registry.py
   cli.py                # REPL entry point
 ```
 
