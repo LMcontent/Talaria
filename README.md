@@ -45,12 +45,26 @@ turn and reloaded automatically the next time you start the CLI — you don't
 lose context by closing the terminal. `/reset` clears it (in memory and on
 disk). Override the file location with `MEMORY_FILE` in `.env`.
 
+Old turns are trimmed automatically once the conversation exceeds
+`MAX_HISTORY_TURNS` (default 30) so requests don't keep growing forever —
+tune it in `.env` if you need a longer or shorter window.
+
+### Streaming and code execution
+
+Responses are streamed to the terminal as they're generated (for both
+providers), instead of waiting for the full answer.
+
+`run_python` asks for a `y/N` confirmation in the terminal before actually
+running any code the model generated — the code runs with your OS-level
+permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
+in `.env` to skip the prompt (only if you fully trust the model/provider).
+
 ### Tools available to the agent
 
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript.
 - `browser_fetch` — open a URL in a real headless Chromium (via Playwright) that executes JavaScript, for sites where `web_fetch` returns empty/garbled content. Slower, and **not a guaranteed bypass** for sites with strong anti-bot protection (e.g. Ozon) — they can still block or serve a challenge page to a headless browser.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
-- `run_python` — execute a Python snippet and capture its output (not sandboxed beyond a timeout — only use with a model/provider you trust)
+- `run_python` — execute a Python snippet and capture its output (not sandboxed beyond a timeout — only use with a model/provider you trust; asks for confirmation first, see above)
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 
 ### Architecture
@@ -59,11 +73,12 @@ disk). Override the file location with `MEMORY_FILE` in `.env`.
 mini_hermes/
   config.py            # env-based settings, provider selection
   memory.py             # persist/reload conversation history to disk
+  compaction.py          # trim old turns once history grows too large
   agent.py             # the tool-calling loop
   providers/
     base.py            # provider-neutral message/tool types
-    claude.py           # Anthropic backend
-    openai_compat.py    # OpenAI-compatible router backend
+    claude.py           # Anthropic backend (streams responses)
+    openai_compat.py    # OpenAI-compatible router backend (streams responses)
     dns_pin.py           # optional DNS pinning for blocked regions
   tools/
     web.py, browser.py, documents.py, code_exec.py, delegate.py, registry.py
