@@ -55,7 +55,13 @@ class Agent:
                     }
                 )
 
-        return "[stopped: reached max_turns without a final answer]"
+        # Providers stream their text live via print() as it's generated, but
+        # this fallback message is never sent through a provider — print it
+        # here too so it's not silently swallowed by a caller that relies on
+        # streaming output instead of the return value.
+        fallback = "[stopped: reached max_turns without a final answer]"
+        print(fallback, end="", flush=True)
+        return fallback
 
     def _call_tool(self, name: str, tool_input: dict) -> str:
         tool = self.tools_by_name.get(name)

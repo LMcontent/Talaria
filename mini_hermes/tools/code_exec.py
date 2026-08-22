@@ -8,7 +8,7 @@ _TIMEOUT = 15
 _MAX_CHARS = 4000
 
 
-def run_python(workspace_dir: str, code: str) -> str:
+def run_python(workspace_dir: str, code: str, require_confirmation: bool = True) -> str:
     """Run a Python snippet in a subprocess and return its stdout/stderr.
 
     Runs with the workspace directory as cwd, under a wall-clock timeout.
@@ -16,6 +16,18 @@ def run_python(workspace_dir: str, code: str) -> str:
     permissions as mini-hermes itself, so only use this with a trusted model
     and be mindful of what code you let it execute.
     """
+    if require_confirmation:
+        print("\n--- The model wants to run this Python code: ---")
+        print(code)
+        print("--- end of code ---")
+        answer = input("Allow execution? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes", "д", "да"):
+            return (
+                "Execution declined by the user. Do not attempt to run this "
+                "(or equivalent) code again without a clear reason and "
+                "explaining first what it does and why it's needed."
+            )
+
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(code)
         script_path = f.name
@@ -45,7 +57,7 @@ def run_python(workspace_dir: str, code: str) -> str:
     return output or "(no output)"
 
 
-def make_code_tool(workspace_dir: str) -> ToolSpec:
+def make_code_tool(workspace_dir: str, require_confirmation: bool = True) -> ToolSpec:
     import os
 
     os.makedirs(workspace_dir, exist_ok=True)
@@ -54,12 +66,13 @@ def make_code_tool(workspace_dir: str) -> ToolSpec:
         description=(
             "Execute a Python code snippet and return its stdout/stderr. "
             "Runs in the workspace directory. Use for calculations, data "
-            "processing, or generating files with libraries like pandas."
+            "processing, or generating files with libraries like pandas. "
+            "The user will be asked to approve the code before it runs."
         ),
         input_schema={
             "type": "object",
             "properties": {"code": {"type": "string", "description": "Python source code to run."}},
             "required": ["code"],
         },
-        handler=lambda code: run_python(workspace_dir, code),
+        handler=lambda code: run_python(workspace_dir, code, require_confirmation),
     )

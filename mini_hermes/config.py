@@ -21,6 +21,9 @@ class Config:
     openai_compat_dns_pin: bool
     openai_compat_dns_servers: list[str]
 
+    confirm_code_exec: bool
+    max_history_turns: int
+
     max_turns: int = 15
     max_delegate_depth: int = 2
 
@@ -54,4 +57,6 @@ def load_config() -> Config:
         openai_compat_dns_servers=_parse_list(
             os.environ.get("OPENAI_COMPAT_DNS_SERVERS", "")
         ),
+        confirm_code_exec=_parse_bool(os.environ.get("CONFIRM_CODE_EXEC", "true")),
+        max_history_turns=int(os.environ.get("MAX_HISTORY_TURNS", "30")),
     )
