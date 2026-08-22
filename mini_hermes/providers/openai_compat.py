@@ -10,7 +10,20 @@ class OpenAICompatProvider(Provider):
     (OrcaRouter, OpenRouter, etc.) — set OPENAI_COMPAT_BASE_URL / _API_KEY / _MODEL.
     """
 
-    def __init__(self, api_key: str, base_url: str, model: str):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        dns_pin: bool = False,
+        dns_servers: list[str] | None = None,
+    ):
+        if dns_pin:
+            from mini_hermes.providers.dns_pin import pin_base_url
+
+            ip = pin_base_url(base_url, dns_servers or [])
+            print(f"[dns-pin] {base_url} -> {ip}")
+
         # Flaky routers/proxies can drop the connection mid-response — retry
         # a few times before giving up, and allow slow "stealth" models room
         # to respond instead of timing out early.

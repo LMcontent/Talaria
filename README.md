@@ -19,6 +19,13 @@ For `openai_compat`, set `OPENAI_COMPAT_BASE_URL` / `OPENAI_COMPAT_API_KEY` /
 https://www.orcarouter.ai/console/catalog?q=free — check their docs for the
 exact base URL and model slug, since routers vary).
 
+If your network can't reach `OPENAI_COMPAT_BASE_URL`'s host directly (e.g.
+it's blocked in your region), set `OPENAI_COMPAT_DNS_PIN=true` and
+`OPENAI_COMPAT_DNS_SERVERS` to an alternate DNS resolver (a "smart
+DNS"/unblocking service) that returns a reachable IP for it. This only
+changes which IP gets dialed for that one host — TLS/SNI still use the real
+hostname, so certificate validation is unaffected.
+
 ### Run
 
 ```bash

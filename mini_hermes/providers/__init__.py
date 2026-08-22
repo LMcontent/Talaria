@@ -20,10 +20,17 @@ def make_provider(config: Config) -> Provider:
                 "LLM_PROVIDER=openai_compat but OPENAI_COMPAT_API_KEY is not set "
                 "(see .env.example)"
             )
+        if config.openai_compat_dns_pin and not config.openai_compat_dns_servers:
+            raise RuntimeError(
+                "OPENAI_COMPAT_DNS_PIN=true but OPENAI_COMPAT_DNS_SERVERS is empty "
+                "(see .env.example)"
+            )
         return OpenAICompatProvider(
             api_key=config.openai_compat_api_key,
             base_url=config.openai_compat_base_url,
             model=config.openai_compat_model,
+            dns_pin=config.openai_compat_dns_pin,
+            dns_servers=config.openai_compat_dns_servers,
         )
 
     raise ValueError(f"Unknown LLM_PROVIDER: {config.provider!r} (use 'claude' or 'openai_compat')")
