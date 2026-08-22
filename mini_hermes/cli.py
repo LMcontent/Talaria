@@ -37,7 +37,14 @@ def main() -> None:
             print("(history cleared)")
             continue
 
-        reply = agent.run(user_input, history=history)
+        history_len_before = len(history)
+        try:
+            reply = agent.run(user_input, history=history)
+        except Exception as e:
+            del history[history_len_before:]  # drop this turn's partial state
+            print(f"\n[Ошибка при обращении к модели: {e}]\nПопробуйте ещё раз, история диалога не пострадала.")
+            continue
+
         print(f"\nhermes> {reply}")
 
 
