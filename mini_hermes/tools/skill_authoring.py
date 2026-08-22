@@ -9,7 +9,7 @@ write_document.
 import importlib.util
 import os
 
-from mini_hermes.providers.base import Provider, ToolSpec
+from mini_hermes.providers.base import Provider, ToolSpec, is_tool_list
 from mini_hermes.security_review import review_code
 
 
@@ -55,9 +55,14 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
             return f"Error: the saved file failed to import ({e}); removed it. Fix the code and try again."
 
         new_tools = getattr(module, "TOOLS", None)
-        if not new_tools:
+        if not is_tool_list(new_tools):
             os.remove(path)
-            return "Error: the file has no top-level TOOLS list; removed it. Try again."
+            return (
+                "Error: TOOLS must be a non-empty list of "
+                "mini_hermes.providers.base.ToolSpec instances — import "
+                "ToolSpec from mini_hermes.providers.base, don't define your "
+                "own class with that name. Removed the file; fix and try again."
+            )
 
         agent.add_tools(new_tools)
         return (
@@ -70,10 +75,13 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
         description=(
             "Propose a brand-new tool ('skill') for yourself, as Python "
             "source defining a top-level TOOLS list of ToolSpec objects "
-            "(same pattern as the built-in tools). The code is shown to the "
-            "user, security-reviewed, and only saved/loaded if the user "
-            "explicitly approves. This is the ONLY way to add a new tool — "
-            "never write skill files directly with write_document."
+            "(same pattern as the built-in tools). The code MUST start with "
+            "'from mini_hermes.providers.base import ToolSpec' — do not "
+            "define your own ToolSpec-like class, it will be rejected. The "
+            "code is shown to the user, security-reviewed, and only saved/"
+            "loaded if the user explicitly approves. This is the ONLY way "
+            "to add a new tool — never write skill files directly with "
+            "write_document."
         ),
         input_schema={
             "type": "object",
