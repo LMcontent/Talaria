@@ -17,9 +17,19 @@ class Config:
     openai_compat_base_url: str
     openai_compat_api_key: str | None
     openai_compat_model: str
+    openai_compat_dns_pin: bool
+    openai_compat_dns_servers: list[str]
 
     max_turns: int = 15
     max_delegate_depth: int = 2
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _parse_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def load_config() -> Config:
@@ -34,5 +44,9 @@ def load_config() -> Config:
         openai_compat_api_key=os.environ.get("OPENAI_COMPAT_API_KEY"),
         openai_compat_model=os.environ.get(
             "OPENAI_COMPAT_MODEL", "qwen/qwen3.8-27b-free"
+        ),
+        openai_compat_dns_pin=_parse_bool(os.environ.get("OPENAI_COMPAT_DNS_PIN", "false")),
+        openai_compat_dns_servers=_parse_list(
+            os.environ.get("OPENAI_COMPAT_DNS_SERVERS", "")
         ),
     )
