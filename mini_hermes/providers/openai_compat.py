@@ -11,7 +11,12 @@ class OpenAICompatProvider(Provider):
     """
 
     def __init__(self, api_key: str, base_url: str, model: str):
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        # Flaky routers/proxies can drop the connection mid-response — retry
+        # a few times before giving up, and allow slow "stealth" models room
+        # to respond instead of timing out early.
+        self.client = OpenAI(
+            api_key=api_key, base_url=base_url, max_retries=5, timeout=120.0
+        )
         self.model = model
 
     def chat(self, history: list[dict], system: str, tools: list[ToolSpec]) -> ProviderResponse:
