@@ -5,6 +5,7 @@ from mini_hermes.compaction import compact_history
 from mini_hermes.config import load_config
 from mini_hermes.memory import clear_history, load_history, save_history
 from mini_hermes.providers import make_provider
+from mini_hermes.roles import DEFAULT_ROLE, ROLES
 from mini_hermes.tools.registry import build_tools
 
 
@@ -18,9 +19,13 @@ def main() -> None:
         sys.exit(1)
 
     tools = build_tools(config, provider)
-    agent = Agent(provider, tools, max_turns=config.max_turns)
+    current_role = config.default_role if config.default_role in ROLES else DEFAULT_ROLE
+    agent = Agent(provider, tools, system=ROLES[current_role]["system"], max_turns=config.max_turns)
 
-    print(f"mini-hermes ready (provider={config.provider}). Type /exit to quit, /reset to clear history.")
+    print(
+        f"mini-hermes ready (provider={config.provider}, role={current_role}). "
+        "Commands: /exit, /reset, /role [name], /tools."
+    )
 
     history = compact_history(load_history(config.memory_file), config.max_history_turns)
     if history:
@@ -41,6 +46,25 @@ def main() -> None:
             history = []
             clear_history(config.memory_file)
             print("(history cleared)")
+            continue
+        if user_input == "/tools":
+            print("Available tools:")
+            for t in tools:
+                print(f"  - {t.name}: {t.description}")
+            continue
+        if user_input == "/role" or user_input.startswith("/role "):
+            arg = user_input[len("/role"):].strip()
+            if not arg:
+                print("Available roles:")
+                for name, info in ROLES.items():
+                    marker = "*" if name == current_role else " "
+                    print(f"  {marker} {name} — {info['description']}")
+            elif arg in ROLES:
+                current_role = arg
+                agent.system = ROLES[arg]["system"]
+                print(f"(role switched to {arg})")
+            else:
+                print(f"Unknown role {arg!r}. Type /role to see the list.")
             continue
 
         history_len_before = len(history)
