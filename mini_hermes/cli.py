@@ -1,6 +1,7 @@
 import sys
 
 from mini_hermes.agent import Agent
+from mini_hermes.compaction import compact_history
 from mini_hermes.config import load_config
 from mini_hermes.memory import clear_history, load_history, save_history
 from mini_hermes.providers import make_provider
@@ -21,7 +22,7 @@ def main() -> None:
 
     print(f"mini-hermes ready (provider={config.provider}). Type /exit to quit, /reset to clear history.")
 
-    history = load_history(config.memory_file)
+    history = compact_history(load_history(config.memory_file), config.max_history_turns)
     if history:
         print(f"(loaded {len(history)} saved messages from {config.memory_file})")
 
@@ -43,15 +44,17 @@ def main() -> None:
             continue
 
         history_len_before = len(history)
+        print("\nhermes> ", end="", flush=True)
         try:
-            reply = agent.run(user_input, history=history)
+            agent.run(user_input, history=history)
         except Exception as e:
             del history[history_len_before:]  # drop this turn's partial state
             print(f"\n[Ошибка при обращении к модели: {e}]\nПопробуйте ещё раз, история диалога не пострадала.")
             continue
 
+        history = compact_history(history, config.max_history_turns)
         save_history(config.memory_file, history)
-        print(f"\nhermes> {reply}")
+        print()  # newline after the streamed reply
 
 
 if __name__ == "__main__":

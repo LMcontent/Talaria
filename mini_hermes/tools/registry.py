@@ -12,7 +12,7 @@ def build_tools(config: Config, provider: Provider, depth: int = 0) -> list[Tool
         *WEB_TOOLS,
         *BROWSER_TOOLS,
         *make_document_tools(config.workspace_dir),
-        make_code_tool(config.workspace_dir),
+        make_code_tool(config.workspace_dir, config.confirm_code_exec),
     ]
 
     delegate_tool = make_delegate_tool(

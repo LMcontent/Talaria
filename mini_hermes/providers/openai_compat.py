@@ -35,21 +35,45 @@ class OpenAICompatProvider(Provider):
     def chat(self, history: list[dict], system: str, tools: list[ToolSpec]) -> ProviderResponse:
         messages = [{"role": "system", "content": system}, *_to_openai_messages(history)]
 
-        response = self.client.chat.completions.create(
+        stream = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             tools=[_to_openai_tool(t) for t in tools] if tools else None,
+            stream=True,
         )
 
-        choice = response.choices[0].message
-        text = choice.content or ""
+        text_parts: list[str] = []
+        tool_call_chunks: dict[int, dict] = {}
+
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            if delta.content:
+                text_parts.append(delta.content)
+                print(delta.content, end="", flush=True)
+
+            for tc_delta in delta.tool_calls or []:
+                acc = tool_call_chunks.setdefault(
+                    tc_delta.index, {"id": None, "name": None, "arguments": ""}
+                )
+                if tc_delta.id:
+                    acc["id"] = tc_delta.id
+                if tc_delta.function:
+                    if tc_delta.function.name:
+                        acc["name"] = tc_delta.function.name
+                    if tc_delta.function.arguments:
+                        acc["arguments"] += tc_delta.function.arguments
+
+        text = "".join(text_parts)
         tool_calls = [
             ToolCall(
-                id=tc.id,
-                name=tc.function.name,
-                input=json.loads(tc.function.arguments or "{}"),
+                id=acc["id"],
+                name=acc["name"],
+                input=json.loads(acc["arguments"] or "{}"),
             )
-            for tc in (choice.tool_calls or [])
+            for _, acc in sorted(tool_call_chunks.items())
         ]
         return ProviderResponse(text=text, tool_calls=tool_calls)
 

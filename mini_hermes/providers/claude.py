@@ -9,13 +9,16 @@ class ClaudeProvider(Provider):
         self.model = model
 
     def chat(self, history: list[dict], system: str, tools: list[ToolSpec]) -> ProviderResponse:
-        response = self.client.messages.create(
+        with self.client.messages.stream(
             model=self.model,
             max_tokens=16000,
             system=system,
             messages=_to_anthropic_messages(history),
             tools=[_to_anthropic_tool(t) for t in tools] if tools else anthropic.NOT_GIVEN,
-        )
+        ) as stream:
+            for text_chunk in stream.text_stream:
+                print(text_chunk, end="", flush=True)
+            response = stream.get_final_message()
 
         text = "".join(b.text for b in response.content if b.type == "text")
         tool_calls = [
