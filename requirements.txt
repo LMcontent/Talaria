@@ -6,3 +6,4 @@ pypdf>=4.0
 python-docx>=1.1
 python-dotenv>=1.0
 dnspython>=2.6
+playwright>=1.44

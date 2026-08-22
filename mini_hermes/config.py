@@ -10,6 +10,7 @@ load_dotenv()
 class Config:
     provider: str
     workspace_dir: str
+    memory_file: str
 
     claude_api_key: str | None
     claude_model: str
@@ -33,9 +34,13 @@ def _parse_list(value: str) -> list[str]:
 
 
 def load_config() -> Config:
+    workspace_dir = os.environ.get("WORKSPACE_DIR", "./workspace")
     return Config(
         provider=os.environ.get("LLM_PROVIDER", "claude").strip().lower(),
-        workspace_dir=os.environ.get("WORKSPACE_DIR", "./workspace"),
+        workspace_dir=workspace_dir,
+        memory_file=os.environ.get(
+            "MEMORY_FILE", os.path.join(workspace_dir, ".history.json")
+        ),
         claude_api_key=os.environ.get("ANTHROPIC_API_KEY"),
         claude_model=os.environ.get("CLAUDE_MODEL", "claude-opus-5"),
         openai_compat_base_url=os.environ.get(
