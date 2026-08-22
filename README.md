@@ -14,6 +14,66 @@ cp .env.example .env
 # edit .env: set LLM_PROVIDER=claude or openai_compat, and the matching API key
 ```
 
+### Installation on Windows via Anaconda
+
+If you don't already have Python/git set up, this is the easiest path on
+Windows.
+
+1. Open **Anaconda Prompt** (Start menu → search "Anaconda Prompt").
+2. Install git, if you don't have it yet:
+   ```
+   conda install -c conda-forge git -y
+   ```
+3. Clone the repo into a folder of your choice (example below uses
+   `D:\anaconda\mini_hermes` — adjust the path to wherever you want it):
+   ```
+   git clone https://github.com/LMcontent/demo.git D:\anaconda\mini_hermes
+   cd /d D:\anaconda\mini_hermes
+   ```
+4. Create a dedicated environment (keeps this separate from your base
+   `(base)` conda environment):
+   ```
+   conda create -n mini-hermes python=3.11 -y
+   conda activate mini-hermes
+   ```
+   You should see `(mini-hermes)` at the start of the prompt from now on.
+5. Install dependencies and the one-time browser download:
+   ```
+   pip install -r requirements.txt
+   playwright install chromium
+   ```
+6. Create your config file and fill it in:
+   ```
+   copy .env.example .env
+   notepad .env
+   ```
+   At minimum set `LLM_PROVIDER` and the matching API key (`ANTHROPIC_API_KEY`
+   for `claude`, or `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_MODEL` for
+   `openai_compat` — see the comments in `.env.example` for where to get a
+   key). Save and close Notepad.
+7. Run it:
+   ```
+   python -m mini_hermes.cli
+   ```
+
+**Every time you come back to a new Anaconda Prompt window**, you need to
+reactivate the environment and go back to the project folder first, or
+Python won't see the installed packages:
+
+```
+conda activate mini-hermes
+cd /d D:\anaconda\mini_hermes
+python -m mini_hermes.cli
+```
+
+To pull future updates:
+
+```
+cd /d D:\anaconda\mini_hermes
+git pull origin main
+pip install -r requirements.txt
+```
+
 For `openai_compat`, set `OPENAI_COMPAT_BASE_URL` / `OPENAI_COMPAT_API_KEY` /
 `OPENAI_COMPAT_MODEL` from your router's console (e.g.
 https://www.orcarouter.ai/console/catalog?q=free — check their docs for the

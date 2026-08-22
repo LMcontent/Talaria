@@ -42,3 +42,14 @@ class Provider(ABC):
         self, history: list[dict[str, Any]], system: str, tools: list[ToolSpec]
     ) -> ProviderResponse:
         """Send the conversation to the model and return its reply."""
+
+
+def is_tool_list(obj: object) -> bool:
+    """True if obj is a list of genuine ToolSpec instances.
+
+    A skill's TOOLS could otherwise be a list of look-alike objects (e.g. a
+    skill that defines its own ToolSpec-shaped class instead of importing
+    the real one) — those pass a naive `hasattr(module, "TOOLS")` check but
+    break later at the provider layer, which expects `.input_schema` etc.
+    """
+    return isinstance(obj, list) and bool(obj) and all(isinstance(t, ToolSpec) for t in obj)

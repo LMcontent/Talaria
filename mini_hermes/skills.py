@@ -8,7 +8,7 @@ without touching mini_hermes itself — see skills/example_time.py.
 import importlib.util
 import os
 
-from mini_hermes.providers.base import ToolSpec
+from mini_hermes.providers.base import ToolSpec, is_tool_list
 
 
 def load_skills(skills_dir: str) -> list[ToolSpec]:
@@ -31,7 +31,13 @@ def load_skills(skills_dir: str) -> list[ToolSpec]:
             continue
 
         module_tools = getattr(module, "TOOLS", None)
-        if not module_tools:
+        if module_tools is None:
+            continue
+        if not is_tool_list(module_tools):
+            print(
+                f"[skills] skipped {filename}: TOOLS must be a non-empty list of "
+                "mini_hermes.providers.base.ToolSpec instances"
+            )
             continue
 
         tools.extend(module_tools)
