@@ -5,6 +5,7 @@ from mini_hermes.tools.browser import BROWSER_TOOLS
 from mini_hermes.tools.code_exec import make_code_tool
 from mini_hermes.tools.delegate import make_delegate_tool
 from mini_hermes.tools.documents import make_document_tools
+from mini_hermes.tools.memory_tools import make_memory_tools
 from mini_hermes.tools.web import WEB_TOOLS
 
 
@@ -14,6 +15,7 @@ def build_tools(config: Config, provider: Provider, depth: int = 0) -> list[Tool
         *BROWSER_TOOLS,
         *make_document_tools(config.workspace_dir),
         make_code_tool(config.workspace_dir, config.confirm_code_exec),
+        *make_memory_tools(config.notes_file),
         *load_skills(config.skills_dir),
     ]
 

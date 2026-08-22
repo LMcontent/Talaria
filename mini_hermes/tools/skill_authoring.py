@@ -1,0 +1,94 @@
+"""propose_skill: lets the agent author a brand-new tool for itself, but
+only through a mandatory gate — the code is shown to the user, reviewed by
+a dedicated security-review model call, and only saved/loaded after
+explicit y/N approval. This is the one and only way a skill gets added at
+runtime; the agent is instructed not to write skill files directly with
+write_document.
+"""
+
+import importlib.util
+import os
+
+from mini_hermes.providers.base import Provider, ToolSpec
+from mini_hermes.security_review import review_code
+
+
+def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolSpec:
+    def propose_skill(filename: str, code: str, description: str) -> str:
+        if filename != os.path.basename(filename) or not filename.endswith(".py"):
+            return "Error: filename must be a plain 'name.py' with no path separators."
+
+        print(f"\n--- The agent wants to add a new skill: {filename} ---")
+        print(f"Purpose: {description}")
+        print(code)
+        print("--- end of proposed skill code ---")
+
+        print("\n[security review] ", end="", flush=True)
+        verdict = review_code(provider, code, description)
+        print()
+
+        answer = input(
+            "\nThis code will run with your OS-level permissions every time "
+            "the agent calls this tool, with NO further confirmation after "
+            "today. Save and load this skill? [y/N]: "
+        ).strip().lower()
+        if answer not in ("y", "yes", "д", "да"):
+            return (
+                "The user declined to add this skill. Do not propose the "
+                "same or equivalent code again without addressing the "
+                "concern that likely caused the decline."
+            )
+
+        os.makedirs(skills_dir, exist_ok=True)
+        path = os.path.join(skills_dir, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(code)
+
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"mini_hermes_skill_{filename[:-3]}", path
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except Exception as e:
+            os.remove(path)
+            return f"Error: the saved file failed to import ({e}); removed it. Fix the code and try again."
+
+        new_tools = getattr(module, "TOOLS", None)
+        if not new_tools:
+            os.remove(path)
+            return "Error: the file has no top-level TOOLS list; removed it. Try again."
+
+        agent.add_tools(new_tools)
+        return (
+            f"Skill saved to {path} and loaded (security review said: {verdict[:200]}). "
+            f"Tool(s) now available: {', '.join(t.name for t in new_tools)}."
+        )
+
+    return ToolSpec(
+        name="propose_skill",
+        description=(
+            "Propose a brand-new tool ('skill') for yourself, as Python "
+            "source defining a top-level TOOLS list of ToolSpec objects "
+            "(same pattern as the built-in tools). The code is shown to the "
+            "user, security-reviewed, and only saved/loaded if the user "
+            "explicitly approves. This is the ONLY way to add a new tool — "
+            "never write skill files directly with write_document."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Plain filename, e.g. 'weather.py' — no path separators.",
+                },
+                "code": {"type": "string", "description": "Full Python source implementing the skill."},
+                "description": {
+                    "type": "string",
+                    "description": "One-sentence summary of what this skill does, shown to the user before they approve.",
+                },
+            },
+            "required": ["filename", "code", "description"],
+        },
+        handler=propose_skill,
+    )

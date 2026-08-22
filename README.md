@@ -49,6 +49,13 @@ Old turns are trimmed automatically once the conversation exceeds
 `MAX_HISTORY_TURNS` (default 30) so requests don't keep growing forever —
 tune it in `.env` if you need a longer or shorter window.
 
+**Long-term memory** is separate from conversation history: the `remember`
+tool saves a fact/preference to `WORKSPACE_DIR/.notes.json`, which is
+injected into the system prompt on *every* future session — this is what
+actually lets the agent "know" things across restarts, not just within one
+open terminal. `recall` lists saved notes with their index, `forget
+<index>` removes one. Override the file with `NOTES_FILE` in `.env`.
+
 ### Streaming and code execution
 
 Responses are streamed to the terminal as they're generated (for both
@@ -84,13 +91,29 @@ built-in and skill-provided alike. A skill file that fails to import is
 skipped with a `[skills] failed to load ...` message — it doesn't take
 down the others.
 
+### Self-authored skills
+
+The agent can propose a brand-new tool for itself via `propose_skill`
+(Python source defining a `TOOLS` list, same pattern as a regular skill
+file) — but only through a mandatory gate: the code is printed to the
+terminal, sent through a **separate security-review model call** that
+looks for destructive/exfiltrating/obfuscated behavior and prints its
+verdict, and only saved + loaded live (no restart needed) after you type
+`y` at a final confirmation. A decline, invalid filename (no path
+separators allowed), or code that fails to import all fail safely without
+touching the skills directory. This tool is only ever given to the
+top-level agent — a `delegate_task` sub-agent can't call it, so new tools
+can't be added without you seeing it happen.
+
 ### Tools available to the agent
 
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript.
 - `browser_fetch` — open a URL in a real headless Chromium (via Playwright) that executes JavaScript, for sites where `web_fetch` returns empty/garbled content. Slower, and **not a guaranteed bypass** for sites with strong anti-bot protection (e.g. Ozon) — they can still block or serve a challenge page to a headless browser.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet and capture its output (not sandboxed beyond a timeout — only use with a model/provider you trust; asks for confirmation first, see above)
+- `remember`, `recall`, `forget` — long-term memory across sessions, see above
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
+- `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
 
 ### Architecture
 
@@ -99,8 +122,10 @@ mini_hermes/
   config.py            # env-based settings, provider selection
   memory.py             # persist/reload conversation history to disk
   compaction.py          # trim old turns once history grows too large
+  notes.py                # long-term memory (remember/recall/forget)
   roles.py               # built-in system-prompt presets, switchable with /role
   skills.py               # loads pluggable tools from SKILLS_DIR
+  security_review.py      # model-based review call used by propose_skill
   agent.py             # the tool-calling loop
   providers/
     base.py            # provider-neutral message/tool types
@@ -108,7 +133,8 @@ mini_hermes/
     openai_compat.py    # OpenAI-compatible router backend (streams responses)
     dns_pin.py           # optional DNS pinning for blocked regions
   tools/
-    web.py, browser.py, documents.py, code_exec.py, delegate.py, registry.py
+    web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
+    delegate.py, skill_authoring.py, registry.py
   cli.py                # REPL entry point
 skills/
   example_time.py        # example pluggable skill — see Skills above

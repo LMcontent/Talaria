@@ -4,9 +4,17 @@ from mini_hermes.agent import Agent
 from mini_hermes.compaction import compact_history
 from mini_hermes.config import load_config
 from mini_hermes.memory import clear_history, load_history, save_history
+from mini_hermes.notes import format_notes_for_prompt, load_notes
 from mini_hermes.providers import make_provider
 from mini_hermes.roles import DEFAULT_ROLE, ROLES
 from mini_hermes.tools.registry import build_tools
+from mini_hermes.tools.skill_authoring import make_propose_skill_tool
+
+
+def build_system(role: str, notes_file: str) -> str:
+    base = ROLES[role]["system"]
+    notes_block = format_notes_for_prompt(load_notes(notes_file))
+    return f"{base}\n\n{notes_block}" if notes_block else base
 
 
 def main() -> None:
@@ -20,7 +28,13 @@ def main() -> None:
 
     tools = build_tools(config, provider)
     current_role = config.default_role if config.default_role in ROLES else DEFAULT_ROLE
-    agent = Agent(provider, tools, system=ROLES[current_role]["system"], max_turns=config.max_turns)
+    agent = Agent(
+        provider, tools, system=build_system(current_role, config.notes_file), max_turns=config.max_turns
+    )
+    # propose_skill needs a live reference to `agent` to register whatever it
+    # approves, so it's added after construction rather than via build_tools
+    # — and only on the top-level agent, never on delegate_task sub-agents.
+    agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent)])
 
     print(
         f"mini-hermes ready (provider={config.provider}, role={current_role}). "
@@ -49,7 +63,7 @@ def main() -> None:
             continue
         if user_input == "/tools":
             print("Available tools:")
-            for t in tools:
+            for t in agent.tools:
                 print(f"  - {t.name}: {t.description}")
             continue
         if user_input == "/role" or user_input.startswith("/role "):
@@ -61,11 +75,12 @@ def main() -> None:
                     print(f"  {marker} {name} — {info['description']}")
             elif arg in ROLES:
                 current_role = arg
-                agent.system = ROLES[arg]["system"]
                 print(f"(role switched to {arg})")
             else:
                 print(f"Unknown role {arg!r}. Type /role to see the list.")
             continue
+
+        agent.system = build_system(current_role, config.notes_file)
 
         history_len_before = len(history)
         print("\nhermes> ", end="", flush=True)
