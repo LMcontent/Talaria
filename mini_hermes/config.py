@@ -28,6 +28,9 @@ class Config:
     default_role: str
     skills_dir: str
 
+    web_host: str
+    web_port: int
+
     max_turns: int = 15
     max_delegate_depth: int = 2
 
@@ -68,4 +71,6 @@ def load_config() -> Config:
         max_history_turns=int(os.environ.get("MAX_HISTORY_TURNS", "30")),
         default_role=os.environ.get("DEFAULT_ROLE", "assistant"),
         skills_dir=os.environ.get("SKILLS_DIR", "./skills"),
+        web_host=os.environ.get("WEB_HOST", "127.0.0.1"),
+        web_port=int(os.environ.get("WEB_PORT", "5000")),
     )

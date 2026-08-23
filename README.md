@@ -98,6 +98,32 @@ playwright install chromium
 python -m mini_hermes.cli
 ```
 
+### Web UI
+
+A local browser chat, as an alternative to the terminal:
+
+```bash
+python -m mini_hermes.web
+```
+
+Then open http://127.0.0.1:5000 (or whatever `WEB_HOST`/`WEB_PORT` you set).
+It's the same `Agent` and tools as the CLI — just a different front end —
+including memory, roles (switchable from a dropdown in the header), and
+`propose_skill`.
+
+**Important:** confirmation prompts for `run_python` and `propose_skill`
+still appear in the **terminal window running the server**, not in the
+browser — a chat message will just sit there "thinking…" until you answer
+in that terminal. This keeps the same safety guarantees as the CLI without
+a much bigger rewrite (no code ever runs without a confirmation you
+actually see, it just isn't in the browser tab).
+
+`WEB_HOST` defaults to `127.0.0.1` (localhost only) — leave it that way
+unless you specifically intend to expose this on your network. Anyone who
+can reach this port can chat with the agent, including its `run_python`
+tool (which still asks for approval in your terminal, but is still not
+something you want strangers triggering).
+
 ### Memory
 
 Conversation history is saved to `WORKSPACE_DIR/.history.json` after every
@@ -201,6 +227,7 @@ mini_hermes/
     web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
     delegate.py, skill_authoring.py, registry.py
   cli.py                # REPL entry point
+  web.py                 # local browser chat UI (Flask), same Agent/tools as the CLI
 skills/
   example_time.py        # example pluggable skill — see Skills above
 ```
