@@ -204,6 +204,54 @@ tools can't be added without you seeing it happen.
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
 
+### Development / making it your own
+
+Two ways to get your own copy, depending on the goal.
+
+**Just want your own copy to hack on, no link back to this repo:**
+
+```bash
+git clone https://github.com/LMcontent/Talaria.git
+cd Talaria
+```
+
+Edit, commit, and — if you want it backed up somewhere — create a new
+empty repo under your own GitHub account and point `origin` at it instead:
+
+```bash
+git remote set-url origin https://github.com/<your-account>/<new-name>.git
+git push -u origin main
+```
+
+From that point it's a fully independent project.
+
+**Want to keep the option of pulling in future updates from this repo (or
+sending changes back)?** Fork it on GitHub instead:
+
+1. Click **Fork** on https://github.com/LMcontent/Talaria — creates
+   `github.com/<your-account>/Talaria`.
+2. Clone your fork (not the original):
+   ```bash
+   git clone https://github.com/<your-account>/Talaria.git
+   cd Talaria
+   ```
+3. Add the original as a second remote, so you can pull its updates later:
+   ```bash
+   git remote add upstream https://github.com/LMcontent/Talaria.git
+   ```
+4. Develop and push to your fork as normal (`git push origin main`) — no
+   write access to the original needed, it's entirely your own space.
+5. To pull in updates from the original later:
+   ```bash
+   git fetch upstream
+   git merge upstream/main
+   ```
+
+Either way, from there it's the same setup as above: `pip install -r
+requirements.txt`, copy `.env.example` to `.env` and fill it in,
+`playwright install chromium`, then `python -m talaria.cli` or `python -m
+talaria.web`.
+
 ### Architecture
 
 ```
