@@ -2,13 +2,13 @@
 
 A "skill" is any *.py file in the skills directory that defines a
 top-level `TOOLS: list[ToolSpec]`. Drop a file in there to add a new tool
-without touching mini_hermes itself — see skills/example_time.py.
+without touching talaria itself — see skills/example_time.py.
 """
 
 import importlib.util
 import os
 
-from mini_hermes.providers.base import ToolSpec, is_tool_list
+from talaria.providers.base import ToolSpec, is_tool_list
 
 
 def load_skills(skills_dir: str) -> list[ToolSpec]:
@@ -21,7 +21,7 @@ def load_skills(skills_dir: str) -> list[ToolSpec]:
             continue
 
         path = os.path.join(skills_dir, filename)
-        module_name = f"mini_hermes_skill_{filename[:-3]}"
+        module_name = f"talaria_skill_{filename[:-3]}"
         try:
             spec = importlib.util.spec_from_file_location(module_name, path)
             module = importlib.util.module_from_spec(spec)
@@ -36,7 +36,7 @@ def load_skills(skills_dir: str) -> list[ToolSpec]:
         if not is_tool_list(module_tools):
             print(
                 f"[skills] skipped {filename}: TOOLS must be a non-empty list of "
-                "mini_hermes.providers.base.ToolSpec instances"
+                "talaria.providers.base.ToolSpec instances"
             )
             continue
 

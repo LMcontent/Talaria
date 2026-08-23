@@ -2,7 +2,7 @@ import subprocess
 import sys
 import tempfile
 
-from mini_hermes.providers.base import ToolSpec
+from talaria.providers.base import ToolSpec
 
 _TIMEOUT = 15
 _MAX_CHARS = 4000
@@ -13,7 +13,7 @@ def run_python(workspace_dir: str, code: str, require_confirmation: bool = True)
 
     Runs with the workspace directory as cwd, under a wall-clock timeout.
     This is NOT a sandbox — the snippet runs with the same OS-level
-    permissions as mini-hermes itself, so only use this with a trusted model
+    permissions as Talaria itself, so only use this with a trusted model
     and be mindful of what code you let it execute.
     """
     if require_confirmation:

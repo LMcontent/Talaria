@@ -3,7 +3,7 @@
 import json
 import os
 
-from mini_hermes.providers.base import ToolCall
+from talaria.providers.base import ToolCall
 
 
 def save_history(path: str, history: list[dict]) -> None:

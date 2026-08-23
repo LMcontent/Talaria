@@ -1,6 +1,6 @@
 import anthropic
 
-from mini_hermes.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
+from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
 
 
 class ClaudeProvider(Provider):

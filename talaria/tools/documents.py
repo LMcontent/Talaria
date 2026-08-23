@@ -1,7 +1,7 @@
 import os
 
-from mini_hermes.providers.base import ToolSpec
-from mini_hermes.tools.workspace import WorkspaceError, resolve_path
+from talaria.providers.base import ToolSpec
+from talaria.tools.workspace import WorkspaceError, resolve_path
 
 _MAX_CHARS = 8000
 

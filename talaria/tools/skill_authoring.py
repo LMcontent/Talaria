@@ -9,8 +9,8 @@ write_document.
 import importlib.util
 import os
 
-from mini_hermes.providers.base import Provider, ToolSpec, is_tool_list
-from mini_hermes.security_review import review_code
+from talaria.providers.base import Provider, ToolSpec, is_tool_list
+from talaria.security_review import review_code
 
 
 def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolSpec:
@@ -67,7 +67,7 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
 
         try:
             spec = importlib.util.spec_from_file_location(
-                f"mini_hermes_skill_{filename[:-3]}", path
+                f"talaria_skill_{filename[:-3]}", path
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -80,8 +80,8 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
             os.remove(path)
             return (
                 "Error: TOOLS must be a non-empty list of "
-                "mini_hermes.providers.base.ToolSpec instances — import "
-                "ToolSpec from mini_hermes.providers.base, don't define your "
+                "talaria.providers.base.ToolSpec instances — import "
+                "ToolSpec from talaria.providers.base, don't define your "
                 "own class with that name. Removed the file; fix and try again."
             )
 
@@ -97,7 +97,7 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
             "Propose a brand-new tool ('skill') for yourself, as Python "
             "source defining a top-level TOOLS list of ToolSpec objects "
             "(same pattern as the built-in tools). The code MUST start with "
-            "'from mini_hermes.providers.base import ToolSpec' — do not "
+            "'from talaria.providers.base import ToolSpec' — do not "
             "define your own ToolSpec-like class, it will be rejected. The "
             "code is shown to the user, security-reviewed, and only saved/"
             "loaded if the user explicitly approves. This is the ONLY way "

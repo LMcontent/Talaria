@@ -1,14 +1,14 @@
 import sys
 
-from mini_hermes.agent import Agent
-from mini_hermes.compaction import compact_history
-from mini_hermes.config import load_config
-from mini_hermes.memory import clear_history, load_history, save_history
-from mini_hermes.notes import format_notes_for_prompt, load_notes
-from mini_hermes.providers import make_provider
-from mini_hermes.roles import DEFAULT_ROLE, ROLES
-from mini_hermes.tools.registry import build_tools
-from mini_hermes.tools.skill_authoring import make_propose_skill_tool
+from talaria.agent import Agent
+from talaria.compaction import compact_history
+from talaria.config import load_config
+from talaria.memory import clear_history, load_history, save_history
+from talaria.notes import format_notes_for_prompt, load_notes
+from talaria.providers import make_provider
+from talaria.roles import DEFAULT_ROLE, ROLES
+from talaria.tools.registry import build_tools
+from talaria.tools.skill_authoring import make_propose_skill_tool
 
 
 def build_system(role: str, notes_file: str) -> str:
@@ -37,7 +37,7 @@ def main() -> None:
     agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent)])
 
     print(
-        f"mini-hermes ready (provider={config.provider}, role={current_role}). "
+        f"Talaria ready (provider={config.provider}, role={current_role}). "
         "Commands: /exit, /reset, /role [name], /tools."
     )
 

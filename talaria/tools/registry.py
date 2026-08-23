@@ -1,12 +1,12 @@
-from mini_hermes.config import Config
-from mini_hermes.providers.base import Provider, ToolSpec
-from mini_hermes.skills import load_skills
-from mini_hermes.tools.browser import BROWSER_TOOLS
-from mini_hermes.tools.code_exec import make_code_tool
-from mini_hermes.tools.delegate import make_delegate_tool
-from mini_hermes.tools.documents import make_document_tools
-from mini_hermes.tools.memory_tools import make_memory_tools
-from mini_hermes.tools.web import WEB_TOOLS
+from talaria.config import Config
+from talaria.providers.base import Provider, ToolSpec
+from talaria.skills import load_skills
+from talaria.tools.browser import BROWSER_TOOLS
+from talaria.tools.code_exec import make_code_tool
+from talaria.tools.delegate import make_delegate_tool
+from talaria.tools.documents import make_document_tools
+from talaria.tools.memory_tools import make_memory_tools
+from talaria.tools.web import WEB_TOOLS
 
 
 def build_tools(config: Config, provider: Provider, depth: int = 0) -> list[ToolSpec]:

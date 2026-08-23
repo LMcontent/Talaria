@@ -1,9 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 
-from mini_hermes.providers.base import ToolSpec
+from talaria.providers.base import ToolSpec
 
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; mini-hermes/0.1)"}
+_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Talaria/0.1)"}
 _TIMEOUT = 10
 _MAX_CHARS = 6000
 

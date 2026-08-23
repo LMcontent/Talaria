@@ -1,5 +1,5 @@
-from mini_hermes.notes import add_note, forget_note, load_notes
-from mini_hermes.providers.base import ToolSpec
+from talaria.notes import add_note, forget_note, load_notes
+from talaria.providers.base import ToolSpec
 
 
 def make_memory_tools(notes_file: str) -> list[ToolSpec]:

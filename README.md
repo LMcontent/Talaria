@@ -1,7 +1,5 @@
 # Talaria
 
-## mini-hermes
-
 A small agent for the internet, documents, code and sub-agents, with a
 swappable LLM backend: **Claude API** or any **OpenAI-compatible router**
 (OrcaRouter, OpenRouter, etc. — e.g. a free model like `qwen/qwen3.8-27b-free`).
@@ -25,18 +23,18 @@ Windows.
    conda install -c conda-forge git -y
    ```
 3. Clone the repo into a folder of your choice (example below uses
-   `D:\anaconda\mini_hermes` — adjust the path to wherever you want it):
+   `D:\anaconda\talaria` — adjust the path to wherever you want it):
    ```
-   git clone https://github.com/LMcontent/demo.git D:\anaconda\mini_hermes
-   cd /d D:\anaconda\mini_hermes
+   git clone https://github.com/LMcontent/Talaria.git D:\anaconda\talaria
+   cd /d D:\anaconda\talaria
    ```
 4. Create a dedicated environment (keeps this separate from your base
    `(base)` conda environment):
    ```
-   conda create -n mini-hermes python=3.11 -y
-   conda activate mini-hermes
+   conda create -n talaria python=3.11 -y
+   conda activate talaria
    ```
-   You should see `(mini-hermes)` at the start of the prompt from now on.
+   You should see `(talaria)` at the start of the prompt from now on.
 5. Install dependencies and the one-time browser download:
    ```
    pip install -r requirements.txt
@@ -53,7 +51,7 @@ Windows.
    key). Save and close Notepad.
 7. Run it:
    ```
-   python -m mini_hermes.cli
+   python -m talaria.cli
    ```
 
 **Every time you come back to a new Anaconda Prompt window**, you need to
@@ -61,15 +59,15 @@ reactivate the environment and go back to the project folder first, or
 Python won't see the installed packages:
 
 ```
-conda activate mini-hermes
-cd /d D:\anaconda\mini_hermes
-python -m mini_hermes.cli
+conda activate talaria
+cd /d D:\anaconda\talaria
+python -m talaria.cli
 ```
 
 To pull future updates:
 
 ```
-cd /d D:\anaconda\mini_hermes
+cd /d D:\anaconda\talaria
 git pull origin main
 pip install -r requirements.txt
 ```
@@ -95,7 +93,7 @@ playwright install chromium
 ### Run
 
 ```bash
-python -m mini_hermes.cli
+python -m talaria.cli
 ```
 
 ### Web UI
@@ -103,7 +101,7 @@ python -m mini_hermes.cli
 A local browser chat, as an alternative to the terminal:
 
 ```bash
-python -m mini_hermes.web
+python -m talaria.web
 ```
 
 Then open http://127.0.0.1:5000 (or whatever `WEB_HOST`/`WEB_PORT` you set).
@@ -165,13 +163,13 @@ Set a different starting role with `DEFAULT_ROLE` in `.env`.
 | `coder` | Writes/runs code to verify itself, terse |
 | `analyst` | Works from real data (documents/code), states assumptions |
 
-Add more in `mini_hermes/roles.py`.
+Add more in `talaria/roles.py`.
 
 ### Skills
 
 Drop a `*.py` file into `SKILLS_DIR` (default `./skills`) defining a
 top-level `TOOLS: list[ToolSpec]` and it's loaded automatically on startup
-— no changes to mini_hermes itself needed. See `skills/example_time.py`
+— no changes to Talaria itself needed. See `skills/example_time.py`
 for the pattern. `/tools` in the CLI lists everything currently loaded,
 built-in and skill-provided alike. A skill file that fails to import is
 skipped with a `[skills] failed to load ...` message — it doesn't take
@@ -209,7 +207,7 @@ tools can't be added without you seeing it happen.
 ### Architecture
 
 ```
-mini_hermes/
+talaria/
   config.py            # env-based settings, provider selection
   memory.py             # persist/reload conversation history to disk
   compaction.py          # trim old turns once history grows too large
