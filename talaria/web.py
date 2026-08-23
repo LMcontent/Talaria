@@ -53,7 +53,7 @@ INDEX_HTML = """<!doctype html>
   #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 75%; padding: 8px 12px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
   .msg.user { align-self: flex-end; background: #2b6cb0; color: #fff; }
-  .msg.hermes { align-self: flex-start; background: #fff; border: 1px solid #ddd; }
+  .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #ddd; }
   .msg.error { align-self: flex-start; background: #ffe4e4; border: 1px solid #f5b5b5; color: #8a1f1f; }
   .msg.pending { align-self: flex-start; color: #888; font-style: italic; }
   form#composer {
@@ -65,7 +65,7 @@ INDEX_HTML = """<!doctype html>
   @media (prefers-color-scheme: dark) {
     body { background: #17181c; color: #e6e6e6; }
     header, form#composer { background: #1f2126; border-color: #333; }
-    .msg.hermes { background: #24262c; border-color: #333; }
+    .msg.assistant { background: #24262c; border-color: #333; }
     #input { background: #24262c; color: #e6e6e6; border-color: #444; }
     header select, header button { background: #24262c; color: #e6e6e6; border-color: #444; }
   }
@@ -130,7 +130,7 @@ form.addEventListener("submit", async (e) => {
     if (!res.ok) {
       addMessage("Error: " + (data.error || res.statusText), "error");
     } else {
-      addMessage(data.reply, "hermes");
+      addMessage(data.reply, "assistant");
     }
   } catch (err) {
     pending.remove();
@@ -201,7 +201,7 @@ def create_app(config: Config) -> Flask:
         history_len_before = len(history)
 
         print(f"\n[web] you> {user_input}")
-        print("[web] hermes> ", end="", flush=True)
+        print("[web] talaria> ", end="", flush=True)
         try:
             reply = agent.run(user_input, history=history)
         except Exception as e:

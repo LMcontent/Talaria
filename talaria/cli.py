@@ -83,7 +83,7 @@ def main() -> None:
         agent.system = build_system(current_role, config.notes_file)
 
         history_len_before = len(history)
-        print("\nhermes> ", end="", flush=True)
+        print("\ntalaria> ", end="", flush=True)
         try:
             agent.run(user_input, history=history)
         except Exception as e:
