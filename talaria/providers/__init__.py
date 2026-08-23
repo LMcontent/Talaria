@@ -1,10 +1,10 @@
-from mini_hermes.config import Config
-from mini_hermes.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
+from talaria.config import Config
+from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
 
 
 def make_provider(config: Config) -> Provider:
     if config.provider == "claude":
-        from mini_hermes.providers.claude import ClaudeProvider
+        from talaria.providers.claude import ClaudeProvider
 
         if not config.claude_api_key:
             raise RuntimeError(
@@ -13,7 +13,7 @@ def make_provider(config: Config) -> Provider:
         return ClaudeProvider(api_key=config.claude_api_key, model=config.claude_model)
 
     if config.provider == "openai_compat":
-        from mini_hermes.providers.openai_compat import OpenAICompatProvider
+        from talaria.providers.openai_compat import OpenAICompatProvider
 
         if not config.openai_compat_api_key:
             raise RuntimeError(

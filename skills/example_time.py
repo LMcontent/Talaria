@@ -1,14 +1,14 @@
 """Example skill.
 
 Any *.py file dropped in this directory that defines a top-level TOOLS
-list is picked up automatically on startup — no changes to mini_hermes
+list is picked up automatically on startup — no changes to Talaria
 itself needed. This one adds a current_time tool, since the model
 otherwise has no idea what "now" is.
 """
 
 from datetime import datetime, timezone
 
-from mini_hermes.providers.base import ToolSpec
+from talaria.providers.base import ToolSpec
 
 
 def current_time(tz: str = "UTC") -> str:

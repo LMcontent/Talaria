@@ -7,7 +7,7 @@ browser.
 
 import atexit
 
-from mini_hermes.providers.base import ToolSpec
+from talaria.providers.base import ToolSpec
 
 _MAX_CHARS = 6000
 _USER_AGENT = (

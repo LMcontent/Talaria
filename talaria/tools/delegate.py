@@ -1,7 +1,7 @@
-from mini_hermes.providers.base import Provider, ToolSpec
+from talaria.providers.base import Provider, ToolSpec
 
 SUBAGENT_SYSTEM = (
-    "You are a focused sub-agent spawned by mini-hermes to complete one "
+    "You are a focused sub-agent spawned by Talaria to complete one "
     "specific task. Use your tools as needed, then give a clear, complete "
     "final answer — there is no one else to hand off to."
 )
@@ -20,7 +20,7 @@ def make_delegate_tool(
         return None
 
     def delegate_task(goal: str, context: str = "") -> str:
-        from mini_hermes.agent import Agent
+        from talaria.agent import Agent
 
         sub_agent = Agent(provider, build_subagent_tools(), system=SUBAGENT_SYSTEM)
         prompt = goal if not context else f"Context:\n{context}\n\nTask:\n{goal}"

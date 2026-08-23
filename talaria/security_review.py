@@ -15,7 +15,7 @@ SECURITY_REVIEW_SYSTEM = (
     "shell/os.system/subprocess with shell=True or unsanitized input; "
     "eval/exec of untrusted input; reading credentials/secrets/SSH keys/"
     "environment variables for anything other than the skill's own stated "
-    "purpose; attempts to modify mini_hermes's own source files; or "
+    "purpose; attempts to modify talaria's own source files; or "
     "anything that does something other than what its own name and "
     "description claim. Respond with EXACTLY one line starting with "
     "'VERDICT: SAFE' or 'VERDICT: RISKY', followed by a short explanation "

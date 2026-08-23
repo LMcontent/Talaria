@@ -1,4 +1,4 @@
-"""A minimal local web chat UI for mini-hermes, as an alternative to the
+"""A minimal local web chat UI for Talaria, as an alternative to the
 CLI. Binds to localhost only by default — do NOT expose this port on an
 untrusted network, since run_python/propose_skill can execute code with
 your OS-level permissions.
@@ -13,22 +13,22 @@ import sys
 
 from flask import Flask, jsonify, render_template_string, request
 
-from mini_hermes.agent import Agent
-from mini_hermes.cli import build_system
-from mini_hermes.compaction import compact_history
-from mini_hermes.config import Config, load_config
-from mini_hermes.memory import clear_history, load_history, save_history
-from mini_hermes.providers import make_provider
-from mini_hermes.roles import DEFAULT_ROLE, ROLES
-from mini_hermes.tools.registry import build_tools
-from mini_hermes.tools.skill_authoring import make_propose_skill_tool
+from talaria.agent import Agent
+from talaria.cli import build_system
+from talaria.compaction import compact_history
+from talaria.config import Config, load_config
+from talaria.memory import clear_history, load_history, save_history
+from talaria.providers import make_provider
+from talaria.roles import DEFAULT_ROLE, ROLES
+from talaria.tools.registry import build_tools
+from talaria.tools.skill_authoring import make_propose_skill_tool
 
 INDEX_HTML = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mini-hermes</title>
+<title>Talaria</title>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -73,7 +73,7 @@ INDEX_HTML = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>mini-hermes</h1>
+  <h1>Talaria</h1>
   <span class="meta">provider: {{ provider_name }}</span>
   <select id="role-select">
     {% for name, info in roles.items() %}
@@ -248,7 +248,7 @@ def main() -> None:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"mini-hermes web UI ready at http://{config.web_host}:{config.web_port}  (Ctrl+C to stop)")
+    print(f"Talaria web UI ready at http://{config.web_host}:{config.web_port}  (Ctrl+C to stop)")
     print(
         "Confirmations for run_python / propose_skill appear HERE in this "
         "terminal, not in the browser — check back here if a chat message "

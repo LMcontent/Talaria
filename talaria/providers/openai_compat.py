@@ -2,7 +2,7 @@ import json
 
 from openai import OpenAI
 
-from mini_hermes.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
+from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
 
 
 class OpenAICompatProvider(Provider):
@@ -19,7 +19,7 @@ class OpenAICompatProvider(Provider):
         dns_servers: list[str] | None = None,
     ):
         if dns_pin:
-            from mini_hermes.providers.dns_pin import pin_base_url
+            from talaria.providers.dns_pin import pin_base_url
 
             ip = pin_base_url(base_url, dns_servers or [])
             print(f"[dns-pin] {base_url} -> {ip}")
