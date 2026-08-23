@@ -24,15 +24,36 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
         print("--- end of proposed skill code ---")
 
         print("\n[security review] ", end="", flush=True)
-        verdict = review_code(provider, code, description)
+        try:
+            verdict = review_code(provider, code, description)
+        except Exception as e:
+            verdict = f"VERDICT: RISKY\n(the security review call itself failed: {e} — treating as risky to be safe)"
+            print(verdict)
         print()
 
-        answer = input(
-            "\nThis code will run with your OS-level permissions every time "
-            "the agent calls this tool, with NO further confirmation after "
-            "today. Save and load this skill? [y/N]: "
-        ).strip().lower()
-        if answer not in ("y", "yes", "д", "да"):
+        # Fail closed: anything other than a clean "VERDICT: SAFE" — including
+        # a malformed/missing verdict from a model that didn't follow the
+        # review prompt — is treated as risky and needs the harder gate below.
+        is_risky = not verdict.strip().upper().startswith("VERDICT: SAFE")
+
+        if is_risky:
+            answer = input(
+                "\nThe security review flagged this RISKY (or the review "
+                "itself failed) — see above. This code would run with your "
+                "OS-level permissions every time the agent calls it, with NO "
+                "further confirmation after today. To proceed anyway, type "
+                "exactly: yes, I understand the risk\n> "
+            ).strip().lower()
+            approved = answer == "yes, i understand the risk"
+        else:
+            answer = input(
+                "\nThis code will run with your OS-level permissions every time "
+                "the agent calls this tool, with NO further confirmation after "
+                "today. Save and load this skill? [y/N]: "
+            ).strip().lower()
+            approved = answer in ("y", "yes", "д", "да")
+
+        if not approved:
             return (
                 "The user declined to add this skill. Do not propose the "
                 "same or equivalent code again without addressing the "

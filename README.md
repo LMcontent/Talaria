@@ -156,14 +156,19 @@ down the others.
 The agent can propose a brand-new tool for itself via `propose_skill`
 (Python source defining a `TOOLS` list, same pattern as a regular skill
 file) — but only through a mandatory gate: the code is printed to the
-terminal, sent through a **separate security-review model call** that
-looks for destructive/exfiltrating/obfuscated behavior and prints its
-verdict, and only saved + loaded live (no restart needed) after you type
-`y` at a final confirmation. A decline, invalid filename (no path
-separators allowed), or code that fails to import all fail safely without
-touching the skills directory. This tool is only ever given to the
-top-level agent — a `delegate_task` sub-agent can't call it, so new tools
-can't be added without you seeing it happen.
+terminal and sent through a **separate security-review model call** that
+looks for destructive/exfiltrating/obfuscated behavior and prints a
+verdict. If the verdict is a clean `VERDICT: SAFE`, a plain `y/N` confirms
+it. Anything else — `VERDICT: RISKY`, a malformed/missing verdict (e.g. a
+weaker model that didn't follow the review prompt), or the review call
+itself failing (network error, etc.) — fails closed: instead of `y/N` you
+must type out the full phrase `yes, I understand the risk` to proceed, so
+a risky skill can't slip through on a reflexive `y`. Only after that is it
+saved + loaded live (no restart needed). A decline, invalid filename (no
+path separators allowed), or code that fails to import all fail safely
+without touching the skills directory. This tool is only ever given to
+the top-level agent — a `delegate_task` sub-agent can't call it, so new
+tools can't be added without you seeing it happen.
 
 ### Tools available to the agent
 
