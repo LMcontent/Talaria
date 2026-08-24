@@ -1,4 +1,5 @@
 from talaria.providers.base import Provider, ToolSpec
+from talaria.usage import UsageTracker
 
 SUBAGENT_SYSTEM = (
     "You are a focused sub-agent spawned by Talaria to complete one "
@@ -8,13 +9,19 @@ SUBAGENT_SYSTEM = (
 
 
 def make_delegate_tool(
-    provider: Provider, build_subagent_tools, depth: int, max_depth: int
+    provider: Provider,
+    build_subagent_tools,
+    depth: int,
+    max_depth: int,
+    usage: UsageTracker | None = None,
 ) -> ToolSpec | None:
     """Tool letting the agent hand a self-contained task to a fresh sub-agent.
 
     `build_subagent_tools` is a zero-arg callable returning the tool list the
     sub-agent gets (built at call time, one delegation level deeper, so the
-    sub-agent can itself delegate up to `max_depth`).
+    sub-agent can itself delegate up to `max_depth`). `usage`, if given, is
+    the same UsageTracker as the top-level agent's, so tokens the sub-agent
+    spends count toward the same session total/limit.
     """
     if depth >= max_depth:
         return None
@@ -22,7 +29,7 @@ def make_delegate_tool(
     def delegate_task(goal: str, context: str = "") -> str:
         from talaria.agent import Agent
 
-        sub_agent = Agent(provider, build_subagent_tools(), system=SUBAGENT_SYSTEM)
+        sub_agent = Agent(provider, build_subagent_tools(), system=SUBAGENT_SYSTEM, usage=usage)
         prompt = goal if not context else f"Context:\n{context}\n\nTask:\n{goal}"
         return sub_agent.run(prompt)
 

@@ -63,7 +63,19 @@ class ClaudeProvider(Provider):
             for b in response.content
             if b.type == "tool_use"
         ]
-        return ProviderResponse(text=text, tool_calls=tool_calls)
+        # Cache read/write tokens are still tokens the model processed, so
+        # they're folded into "input" for a simple total — pricing for them
+        # differs from a plain input token, but this is a rough usage/limit
+        # tracker, not an exact billing reconciliation.
+        usage = {
+            "input_tokens": (
+                response.usage.input_tokens
+                + (getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
+                + (getattr(response.usage, "cache_read_input_tokens", 0) or 0)
+            ),
+            "output_tokens": response.usage.output_tokens,
+        }
+        return ProviderResponse(text=text, tool_calls=tool_calls, usage=usage)
 
 
 def _to_anthropic_tool(tool: ToolSpec) -> dict:

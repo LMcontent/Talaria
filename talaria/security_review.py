@@ -24,7 +24,7 @@ SECURITY_REVIEW_SYSTEM = (
 )
 
 
-def review_code(provider, code: str, description: str) -> str:
+def review_code(provider, code: str, description: str, usage=None) -> str:
     history = [
         {
             "role": "user",
@@ -35,4 +35,6 @@ def review_code(provider, code: str, description: str) -> str:
         }
     ]
     response = provider.chat(history, system=SECURITY_REVIEW_SYSTEM, tools=[])
+    if usage and response.usage:
+        usage.add(response.usage.get("input_tokens", 0), response.usage.get("output_tokens", 0))
     return response.text
