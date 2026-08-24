@@ -84,6 +84,16 @@ DNS"/unblocking service) that returns a reachable IP for it. This only
 changes which IP gets dialed for that one host — TLS/SNI still use the real
 hostname, so certificate validation is unaffected.
 
+**If requests start failing (401/403/connection errors) mid-session but
+work again after fully restarting the terminal:** this was a real issue —
+some antivirus/network filters silently kill one specific reused HTTP
+connection partway through a session, and every request after that keeps
+failing on that same broken connection until the whole process (and its
+connection pool) restarts. Both providers now open a fresh connection for
+every single request instead of reusing one, which should avoid this. If
+you still hit it, it's your local network/antivirus actively interfering,
+not something to fix in `.env`.
+
 One-time browser setup (needed for the `browser_fetch` tool):
 
 ```bash
@@ -107,7 +117,10 @@ python -m talaria.web
 Then open http://127.0.0.1:5000 (or whatever `WEB_HOST`/`WEB_PORT` you set).
 It's the same `Agent` and tools as the CLI — just a different front end —
 including memory, roles (switchable from a dropdown in the header), and
-`propose_skill`.
+`propose_skill`. Responses stream into the browser live, the same as the
+terminal does. Reopening the page reloads the saved conversation into the
+chat window (not just into the model's context) so what you see matches
+what it actually remembers.
 
 **Important:** confirmation prompts for `run_python` and `propose_skill`
 still appear in the **terminal window running the server**, not in the

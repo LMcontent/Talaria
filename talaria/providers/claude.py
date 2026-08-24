@@ -1,14 +1,33 @@
+from typing import Callable
+
 import anthropic
+import httpx2
+from anthropic import DefaultHttpxClient
 
 from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
 
 
 class ClaudeProvider(Provider):
     def __init__(self, api_key: str, model: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # max_keepalive_connections=0: fresh TCP/TLS connection per request
+        # instead of a reused pooled one — see the identical comment in
+        # openai_compat.py for why (a filter that kills one specific
+        # long-lived connection mid-session, only cleared by restarting).
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            http_client=DefaultHttpxClient(
+                limits=httpx2.Limits(max_keepalive_connections=0, max_connections=10)
+            ),
+        )
         self.model = model
 
-    def chat(self, history: list[dict], system: str, tools: list[ToolSpec]) -> ProviderResponse:
+    def chat(
+        self,
+        history: list[dict],
+        system: str,
+        tools: list[ToolSpec],
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> ProviderResponse:
         with self.client.messages.stream(
             model=self.model,
             max_tokens=16000,
@@ -18,6 +37,8 @@ class ClaudeProvider(Provider):
         ) as stream:
             for text_chunk in stream.text_stream:
                 print(text_chunk, end="", flush=True)
+                if on_chunk:
+                    on_chunk(text_chunk)
             response = stream.get_final_message()
 
         text = "".join(b.text for b in response.content if b.type == "text")

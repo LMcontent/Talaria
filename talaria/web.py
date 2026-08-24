@@ -9,9 +9,11 @@ request simply waits until you respond there. This reuses the exact same
 Agent/tool code as the CLI; only the transport is different.
 """
 
+import queue
 import sys
+import threading
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, Response, jsonify, render_template_string, request
 
 from talaria.agent import Agent
 from talaria.cli import build_system
@@ -117,23 +119,35 @@ form.addEventListener("submit", async (e) => {
   input.value = "";
   input.disabled = true;
   sendBtn.disabled = true;
-  const pending = addMessage("thinking… (check the terminal if this hangs)", "pending");
+
+  let replyDiv = null;
 
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text }),
     });
-    const data = await res.json();
-    pending.remove();
     if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
       addMessage("Error: " + (data.error || res.statusText), "error");
-    } else {
-      addMessage(data.reply, "assistant");
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunkText = decoder.decode(value, { stream: true });
+      if (!chunkText) continue;
+      if (!replyDiv) replyDiv = addMessage("", "assistant");
+      replyDiv.textContent += chunkText;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    if (!replyDiv) {
+      addMessage("(no response)", "pending");
     }
   } catch (err) {
-    pending.remove();
     addMessage("Network error: " + err, "error");
   } finally {
     input.disabled = false;
@@ -141,6 +155,15 @@ form.addEventListener("submit", async (e) => {
     input.focus();
   }
 });
+
+async function loadHistory() {
+  const res = await fetch("/api/history");
+  const data = await res.json();
+  for (const turn of data.turns) {
+    addMessage(turn.text, turn.role === "user" ? "user" : "assistant");
+  }
+}
+loadHistory();
 
 roleSelect.addEventListener("change", async () => {
   await fetch("/api/role", {
@@ -182,6 +205,7 @@ def create_app(config: Config) -> Flask:
         provider, tools, system=build_system(state["role"], config.notes_file), max_turns=config.max_turns
     )
     agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent)])
+    chat_lock = threading.Lock()
 
     @app.route("/")
     def index():
@@ -203,7 +227,8 @@ def create_app(config: Config) -> Flask:
         print(f"\n[web] you> {user_input}")
         print("[web] talaria> ", end="", flush=True)
         try:
-            reply = agent.run(user_input, history=history)
+            with chat_lock:
+                reply = agent.run(user_input, history=history)
         except Exception as e:
             del history[history_len_before:]
             print(f"\n[web] error: {e}")
@@ -213,6 +238,78 @@ def create_app(config: Config) -> Flask:
         state["history"] = compact_history(history, config.max_history_turns)
         save_history(config.memory_file, state["history"])
         return jsonify({"reply": reply})
+
+    @app.route("/api/chat/stream", methods=["POST"])
+    def chat_stream():
+        data = request.get_json(force=True) or {}
+        user_input = (data.get("message") or "").strip()
+        if not user_input:
+            return jsonify({"error": "empty message"}), 400
+
+        agent.system = build_system(state["role"], config.notes_file)
+        history = state["history"]
+        history_len_before = len(history)
+
+        q: queue.Queue = queue.Queue()
+
+        def worker():
+            print(f"\n[web] you> {user_input}")
+            print("[web] talaria> ", end="", flush=True)
+            try:
+                with chat_lock:
+                    agent.run(user_input, history=history, on_chunk=lambda t: q.put(("chunk", t)))
+                print()
+                q.put(("done", ""))
+            except Exception as e:
+                print(f"\n[web] error: {e}")
+                q.put(("error", str(e)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        # Block for the first event before deciding how to respond: if the
+        # very first thing that happens is an error (by far the most common
+        # case — bad key, connection refused, etc., all fail before any text
+        # streams), we can still return a clean JSON 4xx/5xx instead of
+        # starting a 200 stream. Only once text has actually started do we
+        # commit to a streaming response.
+        first_kind, first_payload = q.get()
+
+        if first_kind == "error":
+            del history[history_len_before:]
+            return jsonify({"error": first_payload}), 500
+
+        def finalize():
+            state["history"] = compact_history(history, config.max_history_turns)
+            save_history(config.memory_file, state["history"])
+
+        if first_kind == "done":
+            finalize()
+            return Response("", mimetype="text/plain")
+
+        def generate():
+            yield first_payload
+            while True:
+                kind, payload = q.get()
+                if kind == "chunk":
+                    yield payload
+                elif kind == "error":
+                    del history[history_len_before:]
+                    return
+                elif kind == "done":
+                    finalize()
+                    return
+
+        return Response(generate(), mimetype="text/plain")
+
+    @app.route("/api/history")
+    def history_endpoint():
+        turns = []
+        for entry in state["history"]:
+            if entry["role"] == "user":
+                turns.append({"role": "user", "text": entry["content"]})
+            elif entry["role"] == "assistant" and entry.get("content"):
+                turns.append({"role": "assistant", "text": entry["content"]})
+        return jsonify({"turns": turns})
 
     @app.route("/api/reset", methods=["POST"])
     def reset():
@@ -254,7 +351,7 @@ def main() -> None:
         "terminal, not in the browser — check back here if a chat message "
         "seems to hang."
     )
-    app.run(host=config.web_host, port=config.web_port, debug=False)
+    app.run(host=config.web_host, port=config.web_port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
