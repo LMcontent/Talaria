@@ -119,17 +119,24 @@ It's the same `Agent` and tools as the CLI — just a different front end.
 Layout is a sidebar (role switcher, reset button, and the full tool list
 with descriptions, always visible) plus a centered chat column, similar to
 Claude Code's UI, rather than a chat that stretches the full browser width.
-Reopening the page reloads the saved conversation into the chat window
-(not just into the model's context) so what you see matches what it
-actually remembers.
+Drag the thin strip on the sidebar's right edge to resize it — your chosen
+width is remembered in the browser for next time. Reopening the page
+reloads the saved conversation into the chat window (not just into the
+model's context) so what you see matches what it actually remembers.
 
 Assistant replies render basic Markdown (`# `/`## `/`### ` headings,
-`**bold**`, `` `code` ``, `- ` bullet lists) instead of showing the raw
-punctuation — a small dependency-free renderer built into the page itself,
-no CDN involved. Only your own messages get the blue bubble; assistant
-replies flow as plain text, unboxed. While a reply is streaming, the page
-only auto-scrolls if you were already at the bottom — scroll up to read
-earlier messages and it won't yank you back down mid-generation.
+`**bold**`, `` `code` ``, `- ` bullet lists, and fenced ` ```python ` code
+blocks) instead of showing the raw punctuation — a small dependency-free
+renderer built into the page itself, no CDN involved. Fenced code blocks
+render in a bordered, horizontally-scrollable block with basic syntax
+highlighting for Python (keywords/strings/comments/numbers); any other
+language still gets the bordered block, just without coloring. Only your
+own messages get the blue bubble; assistant replies flow as plain text,
+unboxed. While a reply is streaming, the page only auto-scrolls if you
+were already at the bottom — scroll up to read earlier messages and it
+won't yank you back down mid-generation. Chat text is sized a bit larger
+than the sidebar's default for comfortable reading; the sidebar itself
+runs noticeably larger still, since it's mostly short labels.
 
 **Important:** confirmation prompts for `run_python` and `propose_skill`
 still appear in the **terminal window running the server**, not in the
