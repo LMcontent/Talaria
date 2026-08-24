@@ -281,6 +281,24 @@ requirements.txt`, copy `.env.example` to `.env` and fill it in,
 `playwright install chromium`, then `python -m talaria.cli` or `python -m
 talaria.web`.
 
+### Tests
+
+```bash
+pytest
+```
+
+No API key or network access needed — every test runs against a scripted
+fake `Provider` (`tests/conftest.py`) that returns pre-queued replies
+instead of calling a real model, so the suite is fast and deterministic.
+Covers the agent's tool-calling loop, history compaction, memory/notes
+persistence, skill loading (including a regression test for a skill that
+shadows `ToolSpec` with a conflicting class), the `propose_skill`
+security-review gate — SAFE/RISKY verdicts, a failed review call, a
+malformed verdict, a bad filename, code that fails to import — and the web
+UI's HTTP endpoints, including its streaming route. Run it after changing
+`talaria/` before pushing, same idea as `py_compile`/`pyflakes` but for
+behavior instead of syntax.
+
 ### Architecture
 
 ```
@@ -305,6 +323,9 @@ talaria/
   web.py                 # local browser chat UI (Flask), same Agent/tools as the CLI
 skills/
   example_time.py        # example pluggable skill — see Skills above
+tests/
+  conftest.py             # ScriptedProvider/RaisingProvider fakes shared by the suite
+  test_*.py                # see Tests above
 ```
 
 Conversation history is kept in a provider-neutral shape and converted to
