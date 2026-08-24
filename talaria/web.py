@@ -24,6 +24,7 @@ from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
+from talaria.usage import UsageTracker
 
 INDEX_HTML = r"""<!doctype html>
 <html lang="en">
@@ -62,6 +63,9 @@ INDEX_HTML = r"""<!doctype html>
   .tool-item:last-child { border-bottom: none; }
   .tool-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
   .tool-item .tdesc { color: #777; margin-top: 2px; line-height: 1.35; }
+
+  #usage-box { font-size: 16.5px; color: #555; line-height: 1.5; }
+  #usage-box .over-limit { color: #a4231d; font-weight: 600; }
 
   #sidebar-resizer {
     width: 5px; flex-shrink: 0; height: 100vh; cursor: col-resize;
@@ -128,6 +132,7 @@ INDEX_HTML = r"""<!doctype html>
     #role-select, #reset-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
     .tool-item { border-color: #2c2d31; }
     .tool-item .tdesc { color: #999; }
+    #usage-box { color: #aaa; }
     form#composer { background: #1f2126; border-color: #333; }
     #input { background: #24262c; color: #e6e6e6; border-color: #444; }
     .msg code { background: rgba(255, 255, 255, 0.12); }
@@ -154,6 +159,10 @@ INDEX_HTML = r"""<!doctype html>
   <div class="sidebar-section">
     <button id="reset-btn" type="button">Reset history</button>
   </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Usage</div>
+    <div id="usage-box">Loading…</div>
+  </div>
   <div class="sidebar-section sidebar-tools">
     <div class="sidebar-section-title">Tools</div>
     <div id="tools-list">Loading…</div>
@@ -179,6 +188,7 @@ const sendBtn = document.getElementById("send");
 const roleSelect = document.getElementById("role-select");
 const resetBtn = document.getElementById("reset-btn");
 const toolsList = document.getElementById("tools-list");
+const usageBox = document.getElementById("usage-box");
 const sidebar = document.getElementById("sidebar");
 const sidebarResizer = document.getElementById("sidebar-resizer");
 
@@ -364,6 +374,7 @@ form.addEventListener("submit", async (e) => {
     sendBtn.textContent = "Send";
     sendBtn.classList.remove("stop");
     input.focus();
+    loadUsage();
   }
 });
 
@@ -380,6 +391,23 @@ async function loadHistory() {
   scrollEl.scrollTop = scrollEl.scrollHeight;
 }
 loadHistory();
+
+async function loadUsage() {
+  const res = await fetch("/api/usage");
+  const u = await res.json();
+  let text = u.total_tokens.toLocaleString() + " tokens (" +
+    u.input_tokens.toLocaleString() + " in / " + u.output_tokens.toLocaleString() +
+    " out), " + u.calls + " call" + (u.calls === 1 ? "" : "s");
+  if (u.estimated_cost !== null) {
+    text += " · ≈ $" + u.estimated_cost.toFixed(4);
+  }
+  if (u.max_tokens) {
+    text += " · limit " + u.max_tokens.toLocaleString();
+  }
+  usageBox.textContent = text;
+  usageBox.classList.toggle("over-limit", u.over_limit);
+}
+loadUsage();
 
 async function loadTools() {
   const res = await fetch("/api/tools");
@@ -425,16 +453,22 @@ def create_app(config: Config) -> Flask:
     app = Flask(__name__)
 
     provider = make_provider(config)
-    tools = build_tools(config, provider)
+    usage = UsageTracker(
+        max_tokens=config.max_session_tokens,
+        input_price_per_m=config.token_price_input_per_m,
+        output_price_per_m=config.token_price_output_per_m,
+    )
+    tools = build_tools(config, provider, usage=usage)
     state = {
         "role": config.default_role if config.default_role in ROLES else DEFAULT_ROLE,
         "history": compact_history(load_history(config.memory_file), config.max_history_turns),
         "cancel_event": None,
     }
     agent = Agent(
-        provider, tools, system=build_system(state["role"], config.notes_file), max_turns=config.max_turns
+        provider, tools, system=build_system(state["role"], config.notes_file),
+        max_turns=config.max_turns, usage=usage,
     )
-    agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent)])
+    agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent, usage=usage)])
     chat_lock = threading.Lock()
 
     @app.route("/")
@@ -580,6 +614,10 @@ def create_app(config: Config) -> Flask:
     @app.route("/api/tools")
     def tools_endpoint():
         return jsonify({"tools": [{"name": t.name, "description": t.description} for t in agent.tools]})
+
+    @app.route("/api/usage")
+    def usage_endpoint():
+        return jsonify(usage.as_dict())
 
     return app
 

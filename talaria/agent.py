@@ -2,6 +2,7 @@ import threading
 from typing import Callable
 
 from talaria.providers.base import Provider, ToolSpec
+from talaria.usage import UsageTracker
 
 DEFAULT_SYSTEM = (
     "You are Talaria, a helpful agent with tools for web search/fetch, "
@@ -18,12 +19,18 @@ class Agent:
         tools: list[ToolSpec],
         system: str = DEFAULT_SYSTEM,
         max_turns: int = 15,
+        usage: UsageTracker | None = None,
     ):
         self.provider = provider
         self.tools = tools
         self.tools_by_name = {t.name: t for t in tools}
         self.system = system
         self.max_turns = max_turns
+        # Shared across the top-level agent and any delegate_task
+        # sub-agents (they're passed the same UsageTracker instance), so a
+        # session-wide token count/limit reflects everything spent, not
+        # just this one agent's own calls.
+        self.usage = usage
 
     def run(
         self,
@@ -46,10 +53,23 @@ class Agent:
         history.append({"role": "user", "content": user_input})
 
         for _ in range(self.max_turns):
+            if self.usage and self.usage.over_limit():
+                # Checked before each call, so the call that pushed the
+                # total over the limit still completed — this only refuses
+                # calls that would come *after* it's already over.
+                fallback = f"[stopped: session token limit reached — {self.usage.summary()}]"
+                print(fallback, end="", flush=True)
+                if on_chunk:
+                    on_chunk(fallback)
+                history.append({"role": "assistant", "content": fallback, "tool_calls": []})
+                return fallback
+
             response = self.provider.chat(
                 history, system=self.system, tools=self.tools, on_chunk=on_chunk,
                 cancel_event=cancel_event,
             )
+            if self.usage and response.usage:
+                self.usage.add(response.usage.get("input_tokens", 0), response.usage.get("output_tokens", 0))
             history.append(
                 {
                     "role": "assistant",

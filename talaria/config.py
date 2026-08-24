@@ -34,6 +34,10 @@ class Config:
     max_turns: int = 15
     max_delegate_depth: int = 2
 
+    max_session_tokens: int = 0
+    token_price_input_per_m: float = 0.0
+    token_price_output_per_m: float = 0.0
+
 
 def _parse_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
@@ -73,4 +77,7 @@ def load_config() -> Config:
         skills_dir=os.environ.get("SKILLS_DIR", "./skills"),
         web_host=os.environ.get("WEB_HOST", "127.0.0.1"),
         web_port=int(os.environ.get("WEB_PORT", "5000")),
+        max_session_tokens=int(os.environ.get("MAX_SESSION_TOKENS", "0")),
+        token_price_input_per_m=float(os.environ.get("TOKEN_PRICE_INPUT_PER_M", "0")),
+        token_price_output_per_m=float(os.environ.get("TOKEN_PRICE_OUTPUT_PER_M", "0")),
     )

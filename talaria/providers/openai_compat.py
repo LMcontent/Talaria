@@ -58,22 +58,39 @@ class OpenAICompatProvider(Provider):
         cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
         messages = [{"role": "system", "content": system}, *_to_openai_messages(history)]
-
-        stream = self.client.chat.completions.create(
+        kwargs = dict(
             model=self.model,
             messages=messages,
             tools=[_to_openai_tool(t) for t in tools] if tools else None,
             stream=True,
         )
+        try:
+            # Asks the router to include a final usage-only chunk, needed to
+            # track token spend. Not every OpenAI-compatible router accepts
+            # this field — if it's rejected outright (rather than just
+            # silently ignored), fall back to a plain request rather than
+            # breaking chat entirely; that call just won't have usage data.
+            stream = self.client.chat.completions.create(
+                stream_options={"include_usage": True}, **kwargs
+            )
+        except Exception:
+            stream = self.client.chat.completions.create(**kwargs)
 
         text_parts: list[str] = []
         tool_call_chunks: dict[int, dict] = {}
+        usage: dict[str, int] | None = None
         cancelled = False
 
         for chunk in stream:
             if cancel_event and cancel_event.is_set():
                 cancelled = True
                 break
+
+            if getattr(chunk, "usage", None):
+                usage = {
+                    "input_tokens": chunk.usage.prompt_tokens,
+                    "output_tokens": chunk.usage.completion_tokens,
+                }
 
             if not chunk.choices:
                 continue
@@ -113,7 +130,7 @@ class OpenAICompatProvider(Provider):
             )
             for _, acc in sorted(tool_call_chunks.items())
         ]
-        return ProviderResponse(text=text, tool_calls=tool_calls)
+        return ProviderResponse(text=text, tool_calls=tool_calls, usage=usage)
 
 
 def _to_openai_tool(tool: ToolSpec) -> dict:

@@ -36,6 +36,11 @@ class ProviderResponse:
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     cancelled: bool = False
+    # {"input_tokens": int, "output_tokens": int} when the API returned
+    # usage data for this call, else None (e.g. cancelled mid-stream, or an
+    # OpenAI-compatible router that doesn't report usage on streamed
+    # responses).
+    usage: dict[str, int] | None = None
 
 
 class Provider(ABC):

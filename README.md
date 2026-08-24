@@ -116,9 +116,10 @@ python -m talaria.web
 
 Then open http://127.0.0.1:5000 (or whatever `WEB_HOST`/`WEB_PORT` you set).
 It's the same `Agent` and tools as the CLI — just a different front end.
-Layout is a sidebar (role switcher, reset button, and the full tool list
-with descriptions, always visible) plus a centered chat column, similar to
-Claude Code's UI, rather than a chat that stretches the full browser width.
+Layout is a sidebar (role switcher, reset button, a live token-usage box,
+and the full tool list with descriptions, always visible) plus a centered
+chat column, similar to Claude Code's UI, rather than a chat that
+stretches the full browser width.
 Drag the thin strip on the sidebar's right edge to resize it — your chosen
 width is remembered in the browser for next time. Reopening the page
 reloads the saved conversation into the chat window (not just into the
@@ -184,6 +185,28 @@ providers), instead of waiting for the full answer.
 running any code the model generated — the code runs with your OS-level
 permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
 in `.env` to skip the prompt (only if you fully trust the model/provider).
+
+### Usage / session token limit
+
+Talaria counts tokens (input + output) across the whole session, including
+anything spent by `delegate_task` sub-agents and `propose_skill`'s
+security-review calls — check it anytime with `/usage` in the CLI, or the
+always-visible "Usage" section in the web UI's sidebar.
+
+Set `MAX_SESSION_TOKENS` in `.env` (default `0` = no limit) to have Talaria
+refuse further model calls with a clear message once that many tokens have
+been used, instead of silently continuing to spend — useful so a free or
+metered key doesn't run up an unexpectedly large bill on a long session
+with a lot of delegation. It's checked before each individual model call,
+so the call that pushes the total over the limit still completes; only
+calls *after* that are refused.
+
+If you know the $/token price for your specific model (Talaria can't look
+this up automatically — it varies by provider/router/model, and routers
+like OrcaRouter/OpenRouter serve a large, changing catalog), set
+`TOKEN_PRICE_INPUT_PER_M`/`TOKEN_PRICE_OUTPUT_PER_M` ($ per 1,000,000
+tokens) in `.env` to also see an estimated cost alongside the token count.
+Left at `0` (default), only the raw token count is shown — no guessed cost.
 
 ### Roles
 
@@ -300,10 +323,14 @@ Covers the agent's tool-calling loop, history compaction, memory/notes
 persistence, skill loading (including a regression test for a skill that
 shadows `ToolSpec` with a conflicting class), the `propose_skill`
 security-review gate — SAFE/RISKY verdicts, a failed review call, a
-malformed verdict, a bad filename, code that fails to import — and the web
-UI's HTTP endpoints, including its streaming route. Run it after changing
-`talaria/` before pushing, same idea as `py_compile`/`pyflakes` but for
-behavior instead of syntax.
+malformed verdict, a bad filename, code that fails to import — session
+token/cost tracking and the `MAX_SESSION_TOKENS` cap (including that a
+`delegate_task` sub-agent's spend lands on the same session total), and
+the web UI's HTTP endpoints, including its streaming and stop routes (the
+latter via a fake provider that pauses mid-stream so a test can trigger a
+real cancellation from a second thread, not a mocked one). Run it after
+changing `talaria/` before pushing, same idea as `py_compile`/`pyflakes`
+but for behavior instead of syntax.
 
 ### Architecture
 
@@ -316,6 +343,7 @@ talaria/
   roles.py               # built-in system-prompt presets, switchable with /role
   skills.py               # loads pluggable tools from SKILLS_DIR
   security_review.py      # model-based review call used by propose_skill
+  usage.py                # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
   agent.py             # the tool-calling loop
   providers/
     base.py            # provider-neutral message/tool types

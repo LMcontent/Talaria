@@ -9,6 +9,7 @@ from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
+from talaria.usage import UsageTracker
 
 
 def build_system(role: str, notes_file: str) -> str:
@@ -26,19 +27,25 @@ def main() -> None:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    tools = build_tools(config, provider)
+    usage = UsageTracker(
+        max_tokens=config.max_session_tokens,
+        input_price_per_m=config.token_price_input_per_m,
+        output_price_per_m=config.token_price_output_per_m,
+    )
+    tools = build_tools(config, provider, usage=usage)
     current_role = config.default_role if config.default_role in ROLES else DEFAULT_ROLE
     agent = Agent(
-        provider, tools, system=build_system(current_role, config.notes_file), max_turns=config.max_turns
+        provider, tools, system=build_system(current_role, config.notes_file),
+        max_turns=config.max_turns, usage=usage,
     )
     # propose_skill needs a live reference to `agent` to register whatever it
     # approves, so it's added after construction rather than via build_tools
     # — and only on the top-level agent, never on delegate_task sub-agents.
-    agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent)])
+    agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent, usage=usage)])
 
     print(
         f"Talaria ready (provider={config.provider}, role={current_role}). "
-        "Commands: /exit, /reset, /role [name], /tools."
+        "Commands: /exit, /reset, /role [name], /tools, /usage."
     )
 
     history = compact_history(load_history(config.memory_file), config.max_history_turns)
@@ -65,6 +72,9 @@ def main() -> None:
             print("Available tools:")
             for t in agent.tools:
                 print(f"  - {t.name}: {t.description}")
+            continue
+        if user_input == "/usage":
+            print(f"Usage: {usage.summary()}")
             continue
         if user_input == "/role" or user_input.startswith("/role "):
             arg = user_input[len("/role"):].strip()

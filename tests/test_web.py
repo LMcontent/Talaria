@@ -9,10 +9,10 @@ from talaria.providers.base import ProviderResponse
 from tests.conftest import InterruptibleProvider, RaisingProvider, ScriptedProvider
 
 
-def make_config(tmp_path) -> Config:
+def make_config(tmp_path, **overrides) -> Config:
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    return Config(
+    fields = dict(
         provider="fake",
         workspace_dir=str(tmp_path / "workspace"),
         memory_file=str(tmp_path / ".history.json"),
@@ -31,6 +31,8 @@ def make_config(tmp_path) -> Config:
         web_host="127.0.0.1",
         web_port=0,
     )
+    fields.update(overrides)
+    return Config(**fields)
 
 
 @pytest.fixture
@@ -40,8 +42,8 @@ def app_factory(tmp_path, monkeypatch):
     exactly what the "model" says without any real network/API calls.
     """
 
-    def build(responses):
-        config = make_config(tmp_path)
+    def build(responses, **config_overrides):
+        config = make_config(tmp_path, **config_overrides)
         provider = ScriptedProvider(responses)
         monkeypatch.setattr(web, "make_provider", lambda cfg: provider)
         app = web.create_app(config)
@@ -57,8 +59,8 @@ def app_factory_with_provider(tmp_path, monkeypatch):
     ScriptedProvider's script.
     """
 
-    def build(provider):
-        config = make_config(tmp_path)
+    def build(provider, **config_overrides):
+        config = make_config(tmp_path, **config_overrides)
         monkeypatch.setattr(web, "make_provider", lambda cfg: provider)
         app = web.create_app(config)
         return app.test_client(), config
@@ -217,3 +219,54 @@ def test_stop_cancels_generation_mid_stream(app_factory_with_provider):
 
     # Nothing is generating anymore, so a second stop is a no-op.
     assert client.post("/api/chat/stop").status_code == 409
+
+
+def test_usage_endpoint_starts_at_zero(app_factory):
+    client, _, _ = app_factory([])
+    data = client.get("/api/usage").get_json()
+    assert data["total_tokens"] == 0
+    assert data["calls"] == 0
+    assert data["estimated_cost"] is None
+    assert data["over_limit"] is False
+
+
+def test_usage_endpoint_reflects_chat_turns(app_factory):
+    client, _, _ = app_factory(
+        [ProviderResponse(text="hi", tool_calls=[], usage={"input_tokens": 30, "output_tokens": 10})]
+    )
+    client.post("/api/chat", json={"message": "hello"})
+
+    data = client.get("/api/usage").get_json()
+    assert data["input_tokens"] == 30
+    assert data["output_tokens"] == 10
+    assert data["total_tokens"] == 40
+    assert data["calls"] == 1
+
+
+def test_usage_endpoint_reports_estimated_cost_when_prices_configured(app_factory):
+    client, _, _ = app_factory(
+        [ProviderResponse(text="hi", tool_calls=[], usage={"input_tokens": 1_000_000, "output_tokens": 0})],
+        token_price_input_per_m=2.0,
+    )
+    client.post("/api/chat", json={"message": "hello"})
+
+    assert client.get("/api/usage").get_json()["estimated_cost"] == 2.0
+
+
+def test_session_token_limit_blocks_further_chats_without_calling_the_provider(app_factory):
+    client, _, provider = app_factory(
+        [ProviderResponse(text="hi", tool_calls=[], usage={"input_tokens": 80, "output_tokens": 30})],
+        max_session_tokens=100,
+    )
+
+    first = client.post("/api/chat", json={"message": "hello"})
+    assert first.get_json()["reply"] == "hi"
+    assert client.get("/api/usage").get_json()["over_limit"] is True
+
+    second = client.post("/api/chat", json={"message": "again"})
+    assert "token limit" in second.get_json()["reply"]
+    # The first, already-scripted response was consumed by the first
+    # request — a second provider.chat() call here would raise inside
+    # ScriptedProvider, so reaching a 200 with the limit message at all
+    # confirms the provider was never contacted a second time.
+    assert len(provider.calls) == 1

@@ -13,7 +13,7 @@ from talaria.providers.base import Provider, ToolSpec, is_tool_list
 from talaria.security_review import review_code
 
 
-def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolSpec:
+def make_propose_skill_tool(provider: Provider, skills_dir: str, agent, usage=None) -> ToolSpec:
     def propose_skill(filename: str, code: str, description: str) -> str:
         if filename != os.path.basename(filename) or not filename.endswith(".py"):
             return "Error: filename must be a plain 'name.py' with no path separators."
@@ -25,7 +25,7 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent) -> ToolS
 
         print("\n[security review] ", end="", flush=True)
         try:
-            verdict = review_code(provider, code, description)
+            verdict = review_code(provider, code, description, usage=usage)
         except Exception as e:
             verdict = f"VERDICT: RISKY\n(the security review call itself failed: {e} — treating as risky to be safe)"
             print(verdict)
