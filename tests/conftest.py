@@ -5,6 +5,8 @@ history handling, skill gating, web endpoints) deterministically and fast.
 
 import threading
 
+import pytest
+
 from talaria.providers.base import Provider, ProviderResponse
 
 
@@ -75,3 +77,16 @@ class InterruptibleProvider(Provider):
                 self.first_chunk_sent.set()
                 self.may_continue.wait(timeout=5)
         return ProviderResponse(text="".join(text_parts), tool_calls=[])
+
+
+@pytest.fixture(scope="session")
+def sandbox_workspace(tmp_path_factory):
+    """A real sandbox venv (talaria/sandbox.py), built once for the whole
+    test run and shared by every test that needs one — creation takes a
+    few real seconds, so this avoids paying that cost per test.
+    """
+    from talaria.sandbox import ensure_sandbox
+
+    workspace = str(tmp_path_factory.mktemp("sandbox-workspace"))
+    ensure_sandbox(workspace)
+    return workspace

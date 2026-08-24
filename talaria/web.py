@@ -1,12 +1,13 @@
 """A minimal local web chat UI for Talaria, as an alternative to the
 CLI. Binds to localhost only by default — do NOT expose this port on an
-untrusted network, since run_python/propose_skill can execute code with
-your OS-level permissions.
+untrusted network, since run_python/install_package/propose_skill can
+execute code with your OS-level permissions.
 
-Confirmation prompts (run_python, propose_skill) still appear and are
-answered in the terminal running this server, not in the browser — a chat
-request simply waits until you respond there. This reuses the exact same
-Agent/tool code as the CLI; only the transport is different.
+Confirmation prompts (run_python, install_package, propose_skill) still
+appear and are answered in the terminal running this server, not in the
+browser — a chat request simply waits until you respond there. This
+reuses the exact same Agent/tool code as the CLI; only the transport is
+different.
 """
 
 import queue
@@ -171,7 +172,7 @@ INDEX_HTML = r"""<!doctype html>
 <div id="sidebar-resizer"></div>
 <div id="main">
   <div id="warning">
-    Confirmations for run_python / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.
+    Confirmations for run_python / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.
   </div>
   <div id="messages"><div id="messages-inner"></div></div>
   <form id="composer">
@@ -633,8 +634,8 @@ def main() -> None:
 
     print(f"Talaria web UI ready at http://{config.web_host}:{config.web_port}  (Ctrl+C to stop)")
     print(
-        "Confirmations for run_python / propose_skill appear HERE in this "
-        "terminal, not in the browser — check back here if a chat message "
+        "Confirmations for run_python / install_package / propose_skill appear "
+        "HERE in this terminal, not in the browser — check back here if a chat message "
         "seems to hang."
     )
     app.run(host=config.web_host, port=config.web_port, debug=False, threaded=True)

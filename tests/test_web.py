@@ -176,6 +176,8 @@ def test_tools_endpoint_lists_builtin_tools(app_factory):
     client, _, _ = app_factory([])
     names = [t["name"] for t in client.get("/api/tools").get_json()["tools"]]
     assert "web_search" in names
+    assert "run_python" in names
+    assert "install_package" in names
     assert "remember" in names
     assert "propose_skill" in names
 
