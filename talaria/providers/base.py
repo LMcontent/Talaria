@@ -10,6 +10,7 @@ Message shapes used in history:
     {"role": "tool", "tool_call_id": str, "name": str, "content": str}
 """
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -34,6 +35,7 @@ class ToolCall:
 class ProviderResponse:
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+    cancelled: bool = False
 
 
 class Provider(ABC):
@@ -44,12 +46,17 @@ class Provider(ABC):
         system: str,
         tools: list[ToolSpec],
         on_chunk: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
         """Send the conversation to the model and return its reply.
 
         Text is always printed to stdout as it streams in. If on_chunk is
         given, it's additionally called with each text delta as it arrives
-        — used by the web UI to also stream to the browser.
+        — used by the web UI to also stream to the browser. If cancel_event
+        is given and gets set while streaming, the provider stops consuming
+        the stream at the next chunk boundary and returns whatever text was
+        generated so far, with `cancelled=True` — used by the web UI's stop
+        button to cut a reply short mid-generation.
         """
 
 

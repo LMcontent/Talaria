@@ -1,4 +1,5 @@
 import json
+import threading
 from typing import Callable
 
 import httpx2
@@ -54,6 +55,7 @@ class OpenAICompatProvider(Provider):
         system: str,
         tools: list[ToolSpec],
         on_chunk: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
         messages = [{"role": "system", "content": system}, *_to_openai_messages(history)]
 
@@ -66,8 +68,13 @@ class OpenAICompatProvider(Provider):
 
         text_parts: list[str] = []
         tool_call_chunks: dict[int, dict] = {}
+        cancelled = False
 
         for chunk in stream:
+            if cancel_event and cancel_event.is_set():
+                cancelled = True
+                break
+
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -89,6 +96,13 @@ class OpenAICompatProvider(Provider):
                         acc["name"] = tc_delta.function.name
                     if tc_delta.function.arguments:
                         acc["arguments"] += tc_delta.function.arguments
+
+        if cancelled:
+            try:
+                stream.close()
+            except Exception:
+                pass
+            return ProviderResponse(text="".join(text_parts), tool_calls=[], cancelled=True)
 
         text = "".join(text_parts)
         tool_calls = [
