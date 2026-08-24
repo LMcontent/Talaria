@@ -120,7 +120,10 @@ including memory, roles (switchable from a dropdown in the header), and
 `propose_skill`. Responses stream into the browser live, the same as the
 terminal does. Reopening the page reloads the saved conversation into the
 chat window (not just into the model's context) so what you see matches
-what it actually remembers.
+what it actually remembers. Assistant replies render basic Markdown
+(`**bold**`, `` `code` ``, `- ` bullet lists) instead of showing the raw
+asterisks/backticks — a small dependency-free renderer built into the page
+itself, no CDN involved.
 
 **Important:** confirmation prompts for `run_python` and `propose_skill`
 still appear in the **terminal window running the server**, not in the

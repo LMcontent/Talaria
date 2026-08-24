@@ -58,6 +58,12 @@ INDEX_HTML = """<!doctype html>
   .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #ddd; }
   .msg.error { align-self: flex-start; background: #ffe4e4; border: 1px solid #f5b5b5; color: #8a1f1f; }
   .msg.pending { align-self: flex-start; color: #888; font-style: italic; }
+  .msg code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: rgba(0, 0, 0, 0.07); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
+  }
+  .msg ul { margin: 4px 0; padding-left: 20px; }
+  .msg li { margin: 2px 0; }
   form#composer {
     display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #ddd; background: #fff;
   }
@@ -70,6 +76,7 @@ INDEX_HTML = """<!doctype html>
     .msg.assistant { background: #24262c; border-color: #333; }
     #input { background: #24262c; color: #e6e6e6; border-color: #444; }
     header select, header button { background: #24262c; color: #e6e6e6; border-color: #444; }
+    .msg code { background: rgba(255, 255, 255, 0.12); }
   }
 </style>
 </head>
@@ -102,10 +109,36 @@ const roleSelect = document.getElementById("role-select");
 const toolsBtn = document.getElementById("tools-btn");
 const resetBtn = document.getElementById("reset-btn");
 
-function addMessage(text, cls) {
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Small, dependency-free renderer for the subset of Markdown models
+// actually use in replies: inline code, bold, italic, and "- " bullet
+// lists. Input is HTML-escaped first, so nothing the model writes can
+// inject markup — the only tags produced come from this function itself.
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+  html = html.replace(/(^|\n)((?:- .*(?:\n|$))+)/g, (_, pre, block) => {
+    const items = block.replace(/\n$/, "").split("\n")
+      .map((l) => "<li>" + l.replace(/^- /, "") + "</li>").join("");
+    return pre + "<ul>" + items + "</ul>";
+  });
+  html = html.replace(/\n/g, "<br>");
+  return html;
+}
+
+function addMessage(text, cls, renderMd) {
   const div = document.createElement("div");
   div.className = "msg " + cls;
-  div.textContent = text;
+  if (renderMd) {
+    div.innerHTML = renderMarkdown(text);
+  } else {
+    div.textContent = text;
+  }
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
@@ -121,6 +154,7 @@ form.addEventListener("submit", async (e) => {
   sendBtn.disabled = true;
 
   let replyDiv = null;
+  let fullText = "";
 
   try {
     const res = await fetch("/api/chat/stream", {
@@ -141,7 +175,8 @@ form.addEventListener("submit", async (e) => {
       const chunkText = decoder.decode(value, { stream: true });
       if (!chunkText) continue;
       if (!replyDiv) replyDiv = addMessage("", "assistant");
-      replyDiv.textContent += chunkText;
+      fullText += chunkText;
+      replyDiv.innerHTML = renderMarkdown(fullText);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
     if (!replyDiv) {
@@ -160,10 +195,15 @@ async function loadHistory() {
   const res = await fetch("/api/history");
   const data = await res.json();
   for (const turn of data.turns) {
-    addMessage(turn.text, turn.role === "user" ? "user" : "assistant");
+    if (turn.role === "user") {
+      addMessage(turn.text, "user");
+    } else {
+      addMessage(turn.text, "assistant", true);
+    }
   }
 }
 loadHistory();
+
 
 roleSelect.addEventListener("change", async () => {
   await fetch("/api/role", {
