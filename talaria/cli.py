@@ -7,6 +7,7 @@ from talaria.memory import clear_history, load_history, save_history
 from talaria.notes import format_notes_for_prompt, load_notes
 from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
+from talaria.sandbox import list_packages, sandbox_dir
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
 from talaria.usage import UsageTracker
@@ -45,7 +46,7 @@ def main() -> None:
 
     print(
         f"Talaria ready (provider={config.provider}, role={current_role}). "
-        "Commands: /exit, /reset, /role [name], /tools, /usage."
+        "Commands: /exit, /reset, /role [name], /tools, /usage, /venv."
     )
 
     history = compact_history(load_history(config.memory_file), config.max_history_turns)
@@ -75,6 +76,10 @@ def main() -> None:
             continue
         if user_input == "/usage":
             print(f"Usage: {usage.summary()}")
+            continue
+        if user_input == "/venv":
+            print(f"Sandbox: {sandbox_dir(config.workspace_dir)}")
+            print(list_packages(config.workspace_dir))
             continue
         if user_input == "/role" or user_input.startswith("/role "):
             arg = user_input[len("/role"):].strip()

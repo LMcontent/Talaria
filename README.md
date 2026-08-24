@@ -145,8 +145,8 @@ actually cancels the in-flight request to the model, not just the display:
 the partial reply is what gets saved to history, and a "(generation
 stopped)" note is shown so it's clear it wasn't a complete answer.
 
-**Important:** confirmation prompts for `run_python` and `propose_skill`
-still appear in the **terminal window running the server**, not in the
+**Important:** confirmation prompts for `run_python`, `install_package`,
+and `propose_skill` still appear in the **terminal window running the server**, not in the
 browser — a chat message will just sit there "thinking…" until you answer
 in that terminal. This keeps the same safety guarantees as the CLI without
 a much bigger rewrite (no code ever runs without a confirmation you
@@ -185,6 +185,32 @@ providers), instead of waiting for the full answer.
 running any code the model generated — the code runs with your OS-level
 permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
 in `.env` to skip the prompt (only if you fully trust the model/provider).
+
+### Sandbox environment (run_python / install_package)
+
+`run_python` executes in a dedicated virtual environment at
+`WORKSPACE_DIR/.sandbox`, created automatically the first time it (or
+`install_package`) is used — separate from the environment Talaria itself
+runs in. Only the Python standard library is available there until the
+agent calls `install_package` (e.g. `pandas` or `requests==2.32.0`, any
+valid pip requirement) to add something, which asks for the same `y/N`
+approval as `run_python` before it runs. This means the model can pull in
+whatever library a task actually needs without you pre-installing it, and
+a bad or unwanted install is contained to a throwaway environment — delete
+`WORKSPACE_DIR/.sandbox` to reset it to empty, no reinstall of Talaria
+needed.
+
+**This isolates installed packages, not the OS.** The sandbox keeps pip
+installs from corrupting or fighting with Talaria's own dependencies, but
+code run inside it still has the same OS-level user permissions and full
+filesystem/network access as Talaria itself — it is not a security
+boundary against a malicious model, which is exactly why both `run_python`
+and `install_package` still ask for your approval every time
+(`CONFIRM_CODE_EXEC=false` skips both prompts, same flag). For a stronger
+boundary you'd want a container (e.g. Docker), which Talaria doesn't set
+up for you.
+
+Check what's installed anytime with `/venv` in the CLI.
 
 ### Usage / session token limit
 
@@ -257,7 +283,8 @@ tools can't be added without you seeing it happen.
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript.
 - `browser_fetch` — open a URL in a real headless Chromium (via Playwright) that executes JavaScript, for sites where `web_fetch` returns empty/garbled content. Slower, and **not a guaranteed bypass** for sites with strong anti-bot protection (e.g. Ozon) — they can still block or serve a challenge page to a headless browser.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
-- `run_python` — execute a Python snippet and capture its output (not sandboxed beyond a timeout — only use with a model/provider you trust; asks for confirmation first, see above)
+- `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
+- `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
 - `remember`, `recall`, `forget` — long-term memory across sessions, see above
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
@@ -325,12 +352,16 @@ shadows `ToolSpec` with a conflicting class), the `propose_skill`
 security-review gate — SAFE/RISKY verdicts, a failed review call, a
 malformed verdict, a bad filename, code that fails to import — session
 token/cost tracking and the `MAX_SESSION_TOKENS` cap (including that a
-`delegate_task` sub-agent's spend lands on the same session total), and
-the web UI's HTTP endpoints, including its streaming and stop routes (the
+`delegate_task` sub-agent's spend lands on the same session total), the
+web UI's HTTP endpoints including its streaming and stop routes (the
 latter via a fake provider that pauses mid-stream so a test can trigger a
-real cancellation from a second thread, not a mocked one). Run it after
-changing `talaria/` before pushing, same idea as `py_compile`/`pyflakes`
-but for behavior instead of syntax.
+real cancellation from a second thread, not a mocked one), and the
+`run_python`/`install_package` sandbox — a real venv is actually created
+and code actually executed in it (venv creation itself needs no network,
+just Python's bundled ensurepip, so this stays offline too), confirming
+it can't see Talaria's own installed packages. Run it after changing
+`talaria/` before pushing, same idea as `py_compile`/`pyflakes` but for
+behavior instead of syntax.
 
 ### Architecture
 
@@ -344,6 +375,7 @@ talaria/
   skills.py               # loads pluggable tools from SKILLS_DIR
   security_review.py      # model-based review call used by propose_skill
   usage.py                # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
+  sandbox.py               # the dedicated venv run_python/install_package use
   agent.py             # the tool-calling loop
   providers/
     base.py            # provider-neutral message/tool types
