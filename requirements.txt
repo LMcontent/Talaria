@@ -9,3 +9,4 @@ dnspython>=2.6
 playwright>=1.44
 flask>=3.0
 httpx2>=2.0
+pytest>=8.0
