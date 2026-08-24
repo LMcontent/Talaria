@@ -118,6 +118,7 @@ INDEX_HTML = r"""<!doctype html>
   #input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 17.5px; }
   #send { padding: 10px 18px; border-radius: 8px; border: none; background: #2b6cb0; color: #fff; font-size: 17.5px; cursor: pointer; }
   #send:disabled { opacity: 0.5; cursor: default; }
+  #send.stop { background: #a4231d; }
 
   @media (prefers-color-scheme: dark) {
     body { background: #17181c; color: #e6e6e6; }
@@ -288,14 +289,34 @@ function addMessage(text, cls, renderMd, forceScroll) {
   return div;
 }
 
+let generating = false;
+let stopRequested = false;
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+
+  // While a reply is generating, the Send button turns into Stop — a
+  // submit at that point (click or Enter) means "cancel", not "send".
+  if (generating) {
+    stopRequested = true;
+    sendBtn.disabled = true;
+    try {
+      await fetch("/api/chat/stop", { method: "POST" });
+    } finally {
+      sendBtn.disabled = false;
+    }
+    return;
+  }
+
   const text = input.value.trim();
   if (!text) return;
   addMessage(text, "user");
   input.value = "";
   input.disabled = true;
-  sendBtn.disabled = true;
+  generating = true;
+  stopRequested = false;
+  sendBtn.textContent = "Stop";
+  sendBtn.classList.add("stop");
 
   let replyDiv = null;
   let fullText = "";
@@ -332,12 +353,16 @@ form.addEventListener("submit", async (e) => {
     }
     if (!replyDiv) {
       addMessage("(no response)", "pending");
+    } else if (stopRequested) {
+      addMessage("(generation stopped)", "pending");
     }
   } catch (err) {
     addMessage("Network error: " + err, "error");
   } finally {
     input.disabled = false;
-    sendBtn.disabled = false;
+    generating = false;
+    sendBtn.textContent = "Send";
+    sendBtn.classList.remove("stop");
     input.focus();
   }
 });
@@ -404,6 +429,7 @@ def create_app(config: Config) -> Flask:
     state = {
         "role": config.default_role if config.default_role in ROLES else DEFAULT_ROLE,
         "history": compact_history(load_history(config.memory_file), config.max_history_turns),
+        "cancel_event": None,
     }
     agent = Agent(
         provider, tools, system=build_system(state["role"], config.notes_file), max_turns=config.max_turns
@@ -455,13 +481,20 @@ def create_app(config: Config) -> Flask:
         history_len_before = len(history)
 
         q: queue.Queue = queue.Queue()
+        cancel_event = threading.Event()
+        state["cancel_event"] = cancel_event
 
         def worker():
             print(f"\n[web] you> {user_input}")
             print("[web] talaria> ", end="", flush=True)
             try:
                 with chat_lock:
-                    agent.run(user_input, history=history, on_chunk=lambda t: q.put(("chunk", t)))
+                    agent.run(
+                        user_input,
+                        history=history,
+                        on_chunk=lambda t: q.put(("chunk", t)),
+                        cancel_event=cancel_event,
+                    )
                 print()
                 q.put(("done", ""))
             except Exception as e:
@@ -480,11 +513,13 @@ def create_app(config: Config) -> Flask:
 
         if first_kind == "error":
             del history[history_len_before:]
+            state["cancel_event"] = None
             return jsonify({"error": first_payload}), 500
 
         def finalize():
             state["history"] = compact_history(history, config.max_history_turns)
             save_history(config.memory_file, state["history"])
+            state["cancel_event"] = None
 
         if first_kind == "done":
             finalize()
@@ -498,12 +533,21 @@ def create_app(config: Config) -> Flask:
                     yield payload
                 elif kind == "error":
                     del history[history_len_before:]
+                    state["cancel_event"] = None
                     return
                 elif kind == "done":
                     finalize()
                     return
 
         return Response(generate(), mimetype="text/plain")
+
+    @app.route("/api/chat/stop", methods=["POST"])
+    def chat_stop():
+        cancel_event = state.get("cancel_event")
+        if cancel_event is None:
+            return jsonify({"ok": False, "error": "nothing is generating"}), 409
+        cancel_event.set()
+        return jsonify({"ok": True})
 
     @app.route("/api/history")
     def history_endpoint():

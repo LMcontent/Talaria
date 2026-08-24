@@ -138,6 +138,12 @@ won't yank you back down mid-generation. Chat text is sized a bit larger
 than the sidebar's default for comfortable reading; the sidebar itself
 runs noticeably larger still, since it's mostly short labels.
 
+The Send button turns into a **Stop** button while a reply is generating —
+click it (or press Enter again) to cut generation short mid-answer. This
+actually cancels the in-flight request to the model, not just the display:
+the partial reply is what gets saved to history, and a "(generation
+stopped)" note is shown so it's clear it wasn't a complete answer.
+
 **Important:** confirmation prompts for `run_python` and `propose_skill`
 still appear in the **terminal window running the server**, not in the
 browser — a chat message will just sit there "thinking…" until you answer

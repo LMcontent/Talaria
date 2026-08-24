@@ -1,3 +1,4 @@
+import threading
 from typing import Callable
 
 import anthropic
@@ -27,6 +28,7 @@ class ClaudeProvider(Provider):
         system: str,
         tools: list[ToolSpec],
         on_chunk: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
         with self.client.messages.stream(
             model=self.model,
@@ -35,10 +37,24 @@ class ClaudeProvider(Provider):
             messages=_to_anthropic_messages(history),
             tools=[_to_anthropic_tool(t) for t in tools] if tools else anthropic.NOT_GIVEN,
         ) as stream:
+            text_parts: list[str] = []
+            cancelled = False
             for text_chunk in stream.text_stream:
+                text_parts.append(text_chunk)
                 print(text_chunk, end="", flush=True)
                 if on_chunk:
                     on_chunk(text_chunk)
+                if cancel_event and cancel_event.is_set():
+                    cancelled = True
+                    break
+
+            if cancelled:
+                # get_final_message() needs the stream to have run to
+                # completion (message_stop) to assemble its result — since
+                # we broke out early, use what text_stream already gave us
+                # instead. Leaving the `with` block closes the connection.
+                return ProviderResponse(text="".join(text_parts), tool_calls=[], cancelled=True)
+
             response = stream.get_final_message()
 
         text = "".join(b.text for b in response.content if b.type == "text")

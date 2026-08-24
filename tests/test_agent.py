@@ -1,3 +1,5 @@
+import threading
+
 from talaria.agent import Agent
 from talaria.providers.base import ProviderResponse, ToolCall, ToolSpec
 from tests.conftest import ScriptedProvider
@@ -111,6 +113,39 @@ def test_max_turns_exhausted_returns_fallback():
 
     assert reply == "[stopped: reached max_turns without a final answer]"
     assert chunks[-1] == reply
+
+
+def test_cancelled_response_stops_the_loop_without_running_tools():
+    # A cancelled response is treated as final even if it happened to carry
+    # tool_calls (real providers never return any when cancelled, but the
+    # loop shouldn't rely on that) — no tool should get executed after a
+    # cancellation, and the partial text is returned as-is.
+    called = []
+
+    def handler(**_):
+        called.append(True)
+        return "should not run"
+
+    tool = ToolSpec(name="x", description="d", input_schema={}, handler=handler)
+    provider = ScriptedProvider(
+        [ProviderResponse(text="partial...", tool_calls=[], cancelled=True)]
+    )
+    agent = Agent(provider, tools=[tool], system="sys")
+
+    reply = agent.run("go")
+
+    assert reply == "partial..."
+    assert called == []
+
+
+def test_cancel_event_is_forwarded_to_the_provider():
+    provider = ScriptedProvider([ProviderResponse(text="hi", tool_calls=[])])
+    agent = Agent(provider, tools=[], system="sys")
+    cancel_event = threading.Event()
+
+    agent.run("hello", cancel_event=cancel_event)
+
+    assert provider.calls[0]["cancel_event"] is cancel_event
 
 
 def test_add_tools_registers_new_tool_for_next_call():

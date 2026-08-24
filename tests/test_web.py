@@ -1,11 +1,12 @@
 import json
+import threading
 
 import pytest
 
 import talaria.web as web
 from talaria.config import Config
 from talaria.providers.base import ProviderResponse
-from tests.conftest import RaisingProvider, ScriptedProvider
+from tests.conftest import InterruptibleProvider, RaisingProvider, ScriptedProvider
 
 
 def make_config(tmp_path) -> Config:
@@ -175,3 +176,44 @@ def test_tools_endpoint_lists_builtin_tools(app_factory):
     assert "web_search" in names
     assert "remember" in names
     assert "propose_skill" in names
+
+
+def test_stop_returns_409_when_nothing_is_generating(app_factory):
+    client, _, _ = app_factory([])
+    resp = client.post("/api/chat/stop")
+    assert resp.status_code == 409
+
+
+def test_stop_cancels_generation_mid_stream(app_factory_with_provider):
+    provider = InterruptibleProvider(["one ", "two ", "three "])
+    client, config = app_factory_with_provider(provider)
+
+    result: dict = {}
+
+    def do_request():
+        resp = client.post("/api/chat/stream", json={"message": "go"})
+        result["status"] = resp.status_code
+        result["body"] = resp.get_data(as_text=True)
+
+    t = threading.Thread(target=do_request)
+    t.start()
+
+    assert provider.first_chunk_sent.wait(timeout=5), "provider never emitted its first chunk"
+    stop_resp = client.post("/api/chat/stop")
+    assert stop_resp.status_code == 200
+    provider.may_continue.set()
+
+    t.join(timeout=5)
+    assert not t.is_alive(), "request thread never finished"
+
+    # Only the chunk that streamed out before the stop request took effect
+    # made it into the response body — generation was actually cut short,
+    # not just hidden client-side.
+    assert result["status"] == 200
+    assert result["body"] == "one "
+
+    turns = client.get("/api/history").get_json()["turns"]
+    assert turns[-1] == {"role": "assistant", "text": "one "}
+
+    # Nothing is generating anymore, so a second stop is a no-op.
+    assert client.post("/api/chat/stop").status_code == 409

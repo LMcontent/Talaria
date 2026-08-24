@@ -1,3 +1,4 @@
+import threading
 from typing import Callable
 
 from talaria.providers.base import Provider, ToolSpec
@@ -29,12 +30,16 @@ class Agent:
         user_input: str,
         history: list[dict] | None = None,
         on_chunk: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Run one turn. If `history` is given, it is mutated in place with
         the full turn (including any tool calls) so the caller can keep
         reusing the same list across turns for a multi-turn conversation.
         `on_chunk`, if given, is called with each text delta as it streams
         in (in addition to the provider always printing it to stdout).
+        `cancel_event`, if given and set while a reply is streaming, cuts
+        generation short and returns whatever text was produced so far —
+        used by the web UI's stop button.
         """
         if history is None:
             history = []
@@ -42,7 +47,8 @@ class Agent:
 
         for _ in range(self.max_turns):
             response = self.provider.chat(
-                history, system=self.system, tools=self.tools, on_chunk=on_chunk
+                history, system=self.system, tools=self.tools, on_chunk=on_chunk,
+                cancel_event=cancel_event,
             )
             history.append(
                 {
@@ -52,7 +58,7 @@ class Agent:
                 }
             )
 
-            if not response.tool_calls:
+            if response.cancelled or not response.tool_calls:
                 return response.text
 
             for call in response.tool_calls:
