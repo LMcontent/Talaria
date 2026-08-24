@@ -25,7 +25,7 @@ from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
 
-INDEX_HTML = """<!doctype html>
+INDEX_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -224,7 +224,7 @@ toolsBtn.addEventListener("click", async () => {
   const res = await fetch("/api/tools");
   const data = await res.json();
   const lines = data.tools.map((t) => "- " + t.name + ": " + t.description);
-  addMessage("Available tools:\\n" + lines.join("\\n"), "pending");
+  addMessage("Available tools:\n" + lines.join("\n"), "pending");
 });
 </script>
 </body>
