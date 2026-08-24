@@ -1,3 +1,5 @@
+from typing import Callable
+
 from talaria.providers.base import Provider, ToolSpec
 
 DEFAULT_SYSTEM = (
@@ -22,17 +24,26 @@ class Agent:
         self.system = system
         self.max_turns = max_turns
 
-    def run(self, user_input: str, history: list[dict] | None = None) -> str:
+    def run(
+        self,
+        user_input: str,
+        history: list[dict] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> str:
         """Run one turn. If `history` is given, it is mutated in place with
         the full turn (including any tool calls) so the caller can keep
         reusing the same list across turns for a multi-turn conversation.
+        `on_chunk`, if given, is called with each text delta as it streams
+        in (in addition to the provider always printing it to stdout).
         """
         if history is None:
             history = []
         history.append({"role": "user", "content": user_input})
 
         for _ in range(self.max_turns):
-            response = self.provider.chat(history, system=self.system, tools=self.tools)
+            response = self.provider.chat(
+                history, system=self.system, tools=self.tools, on_chunk=on_chunk
+            )
             history.append(
                 {
                     "role": "assistant",
@@ -61,6 +72,8 @@ class Agent:
         # streaming output instead of the return value.
         fallback = "[stopped: reached max_turns without a final answer]"
         print(fallback, end="", flush=True)
+        if on_chunk:
+            on_chunk(fallback)
         return fallback
 
     def add_tools(self, new_tools: list[ToolSpec]) -> None:

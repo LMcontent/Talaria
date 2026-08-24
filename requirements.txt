@@ -8,3 +8,4 @@ python-dotenv>=1.0
 dnspython>=2.6
 playwright>=1.44
 flask>=3.0
+httpx2>=2.0

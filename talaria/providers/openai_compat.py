@@ -1,6 +1,8 @@
 import json
+from typing import Callable
 
-from openai import OpenAI
+import httpx2
+from openai import DefaultHttpxClient, OpenAI
 
 from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
 
@@ -27,12 +29,32 @@ class OpenAICompatProvider(Provider):
         # Flaky routers/proxies can drop the connection mid-response — retry
         # a few times before giving up, and allow slow "stealth" models room
         # to respond instead of timing out early.
+        #
+        # max_keepalive_connections=0 disables HTTP keep-alive so every
+        # request opens a fresh TCP/TLS connection instead of reusing one
+        # from a pool. Some antivirus/network filters intercept and quietly
+        # kill one specific reused connection mid-session — every request
+        # after that keeps failing with a 4xx until the whole process
+        # restarts (which happens to open a fresh pool). Fresh connections
+        # per request avoid depending on any one connection staying good.
         self.client = OpenAI(
-            api_key=api_key, base_url=base_url, max_retries=5, timeout=120.0
+            api_key=api_key,
+            base_url=base_url,
+            max_retries=5,
+            timeout=120.0,
+            http_client=DefaultHttpxClient(
+                limits=httpx2.Limits(max_keepalive_connections=0, max_connections=10)
+            ),
         )
         self.model = model
 
-    def chat(self, history: list[dict], system: str, tools: list[ToolSpec]) -> ProviderResponse:
+    def chat(
+        self,
+        history: list[dict],
+        system: str,
+        tools: list[ToolSpec],
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> ProviderResponse:
         messages = [{"role": "system", "content": system}, *_to_openai_messages(history)]
 
         stream = self.client.chat.completions.create(
@@ -53,6 +75,8 @@ class OpenAICompatProvider(Provider):
             if delta.content:
                 text_parts.append(delta.content)
                 print(delta.content, end="", flush=True)
+                if on_chunk:
+                    on_chunk(delta.content)
 
             for tc_delta in delta.tool_calls or []:
                 acc = tool_call_chunks.setdefault(

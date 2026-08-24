@@ -39,9 +39,18 @@ class ProviderResponse:
 class Provider(ABC):
     @abstractmethod
     def chat(
-        self, history: list[dict[str, Any]], system: str, tools: list[ToolSpec]
+        self,
+        history: list[dict[str, Any]],
+        system: str,
+        tools: list[ToolSpec],
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ProviderResponse:
-        """Send the conversation to the model and return its reply."""
+        """Send the conversation to the model and return its reply.
+
+        Text is always printed to stdout as it streams in. If on_chunk is
+        given, it's additionally called with each text delta as it arrives
+        — used by the web UI to also stream to the browser.
+        """
 
 
 def is_tool_list(obj: object) -> bool:
