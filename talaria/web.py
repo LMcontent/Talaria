@@ -33,95 +33,145 @@ INDEX_HTML = r"""<!doctype html>
 <title>Talaria</title>
 <style>
   :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
   body {
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    margin: 0; display: flex; flex-direction: column; height: 100vh;
-    background: #f5f5f7; color: #1a1a1a;
+    display: flex; background: #f5f5f7; color: #1a1a1a;
   }
-  header {
-    padding: 10px 16px; border-bottom: 1px solid #ddd; background: #fff;
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  #sidebar {
+    width: 260px; flex-shrink: 0; height: 100vh; overflow-y: auto;
+    border-right: 1px solid #ddd; background: #fafafa; padding: 16px;
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .meta { font-size: 12px; color: #666; }
-  header select, header button {
-    font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid #ccc;
-    background: #fff; cursor: pointer;
+  #sidebar h1 { font-size: 16px; margin: 0 0 2px; }
+  #sidebar .meta { font-size: 12px; color: #666; margin-bottom: 18px; }
+  .sidebar-section { margin-bottom: 18px; }
+  .sidebar-section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #888; margin-bottom: 6px;
   }
+  #role-select {
+    width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid #ccc;
+    background: #fff; font-size: 13px;
+  }
+  #reset-btn {
+    width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc;
+    background: #fff; cursor: pointer; font-size: 13px;
+  }
+  .tool-item { padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 12px; }
+  .tool-item:last-child { border-bottom: none; }
+  .tool-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
+  .tool-item .tdesc { color: #777; margin-top: 2px; line-height: 1.35; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; height: 100vh; }
   #warning {
     font-size: 12px; color: #8a5a00; background: #fff6e0; padding: 6px 16px;
-    border-bottom: 1px solid #eedca0;
+    border-bottom: 1px solid #eedca0; flex-shrink: 0;
   }
-  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: 75%; padding: 8px 12px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
-  .msg.user { align-self: flex-end; background: #2b6cb0; color: #fff; }
-  .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #ddd; }
-  .msg.error { align-self: flex-start; background: #ffe4e4; border: 1px solid #f5b5b5; color: #8a1f1f; }
-  .msg.pending { align-self: flex-start; color: #888; font-style: italic; }
+  #messages { flex: 1; overflow-y: auto; min-height: 0; }
+  #messages-inner {
+    max-width: 760px; margin: 0 auto; padding: 24px 20px 12px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+
+  .msg { white-space: pre-wrap; word-wrap: break-word; line-height: 1.55; }
+  .msg.user {
+    align-self: flex-end; max-width: 75%; background: #2b6cb0; color: #fff;
+    padding: 8px 12px; border-radius: 10px;
+  }
+  .msg.assistant { align-self: stretch; }
+  .msg.error { align-self: stretch; color: #a4231d; }
+  .msg.pending { align-self: stretch; color: #888; font-style: italic; }
+
   .msg code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: rgba(0, 0, 0, 0.07); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
   }
   .msg ul { margin: 4px 0; padding-left: 20px; }
   .msg li { margin: 2px 0; }
+  .msg h1, .msg h2, .msg h3 { margin: 0.5em 0 0.25em; line-height: 1.3; }
+  .msg h1 { font-size: 1.3em; }
+  .msg h2 { font-size: 1.15em; }
+  .msg h3 { font-size: 1.05em; }
+
   form#composer {
-    display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #ddd; background: #fff;
+    display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid #ddd;
+    background: #fff; flex-shrink: 0;
   }
   #input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; }
   #send { padding: 10px 18px; border-radius: 8px; border: none; background: #2b6cb0; color: #fff; font-size: 14px; cursor: pointer; }
   #send:disabled { opacity: 0.5; cursor: default; }
+
   @media (prefers-color-scheme: dark) {
     body { background: #17181c; color: #e6e6e6; }
-    header, form#composer { background: #1f2126; border-color: #333; }
-    .msg.assistant { background: #24262c; border-color: #333; }
+    #sidebar { background: #1b1c20; border-color: #2c2d31; }
+    #sidebar .meta { color: #999; }
+    .sidebar-section-title { color: #888; }
+    #role-select, #reset-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
+    .tool-item { border-color: #2c2d31; }
+    .tool-item .tdesc { color: #999; }
+    form#composer { background: #1f2126; border-color: #333; }
     #input { background: #24262c; color: #e6e6e6; border-color: #444; }
-    header select, header button { background: #24262c; color: #e6e6e6; border-color: #444; }
     .msg code { background: rgba(255, 255, 255, 0.12); }
   }
 </style>
 </head>
 <body>
-<header>
+<div id="sidebar">
   <h1>Talaria</h1>
-  <span class="meta">provider: {{ provider_name }}</span>
-  <select id="role-select">
-    {% for name, info in roles.items() %}
-    <option value="{{ name }}" {% if name == role %}selected{% endif %}>{{ name }} — {{ info.description }}</option>
-    {% endfor %}
-  </select>
-  <button id="tools-btn" type="button">Tools</button>
-  <button id="reset-btn" type="button">Reset history</button>
-</header>
-<div id="warning">
-  Confirmations for run_python / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.
+  <div class="meta">provider: {{ provider_name }}</div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Role</div>
+    <select id="role-select">
+      {% for name, info in roles.items() %}
+      <option value="{{ name }}" {% if name == role %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="sidebar-section">
+    <button id="reset-btn" type="button">Reset history</button>
+  </div>
+  <div class="sidebar-section sidebar-tools">
+    <div class="sidebar-section-title">Tools</div>
+    <div id="tools-list">Loading…</div>
+  </div>
 </div>
-<div id="messages"></div>
-<form id="composer">
-  <input id="input" type="text" placeholder="Type a message…" autocomplete="off">
-  <button id="send" type="submit">Send</button>
-</form>
+<div id="main">
+  <div id="warning">
+    Confirmations for run_python / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.
+  </div>
+  <div id="messages"><div id="messages-inner"></div></div>
+  <form id="composer">
+    <input id="input" type="text" placeholder="Type a message…" autocomplete="off">
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
 <script>
-const messagesEl = document.getElementById("messages");
+const messagesEl = document.getElementById("messages-inner");
+const scrollEl = document.getElementById("messages");
 const form = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const roleSelect = document.getElementById("role-select");
-const toolsBtn = document.getElementById("tools-btn");
 const resetBtn = document.getElementById("reset-btn");
+const toolsList = document.getElementById("tools-list");
 
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // Small, dependency-free renderer for the subset of Markdown models
-// actually use in replies: inline code, bold, italic, and "- " bullet
-// lists. Input is HTML-escaped first, so nothing the model writes can
-// inject markup — the only tags produced come from this function itself.
+// actually use in replies: headings, inline code, bold, italic, and
+// "- " bullet lists. Input is HTML-escaped first, so nothing the model
+// writes can inject markup — the only tags produced come from here.
 function renderMarkdown(text) {
   let html = escapeHtml(text);
   html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+  html = html.replace(/(^|\n)### (.*)/g, (_, pre, t) => pre + "<h3>" + t + "</h3>");
+  html = html.replace(/(^|\n)## (.*)/g, (_, pre, t) => pre + "<h2>" + t + "</h2>");
+  html = html.replace(/(^|\n)# (.*)/g, (_, pre, t) => pre + "<h1>" + t + "</h1>");
   html = html.replace(/(^|\n)((?:- .*(?:\n|$))+)/g, (_, pre, block) => {
     const items = block.replace(/\n$/, "").split("\n")
       .map((l) => "<li>" + l.replace(/^- /, "") + "</li>").join("");
@@ -131,7 +181,11 @@ function renderMarkdown(text) {
   return html;
 }
 
-function addMessage(text, cls, renderMd) {
+function isNearBottom() {
+  return scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 80;
+}
+
+function addMessage(text, cls, renderMd, forceScroll) {
   const div = document.createElement("div");
   div.className = "msg " + cls;
   if (renderMd) {
@@ -140,7 +194,9 @@ function addMessage(text, cls, renderMd) {
     div.textContent = text;
   }
   messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (forceScroll !== false) {
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+  }
   return div;
 }
 
@@ -174,10 +230,17 @@ form.addEventListener("submit", async (e) => {
       if (done) break;
       const chunkText = decoder.decode(value, { stream: true });
       if (!chunkText) continue;
-      if (!replyDiv) replyDiv = addMessage("", "assistant");
+      // Only follow the stream to the bottom if the user was already
+      // there — lets them scroll up and read older messages while a
+      // reply is still being generated, instead of getting yanked back
+      // down on every chunk.
+      const wasNearBottom = isNearBottom();
+      if (!replyDiv) replyDiv = addMessage("", "assistant", true, false);
       fullText += chunkText;
       replyDiv.innerHTML = renderMarkdown(fullText);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      if (wasNearBottom) {
+        scrollEl.scrollTop = scrollEl.scrollHeight;
+      }
     }
     if (!replyDiv) {
       addMessage("(no response)", "pending");
@@ -196,14 +259,34 @@ async function loadHistory() {
   const data = await res.json();
   for (const turn of data.turns) {
     if (turn.role === "user") {
-      addMessage(turn.text, "user");
+      addMessage(turn.text, "user", false, false);
     } else {
-      addMessage(turn.text, "assistant", true);
+      addMessage(turn.text, "assistant", true, false);
     }
   }
+  scrollEl.scrollTop = scrollEl.scrollHeight;
 }
 loadHistory();
 
+async function loadTools() {
+  const res = await fetch("/api/tools");
+  const data = await res.json();
+  toolsList.innerHTML = "";
+  for (const t of data.tools) {
+    const item = document.createElement("div");
+    item.className = "tool-item";
+    const name = document.createElement("div");
+    name.className = "tname";
+    name.textContent = t.name;
+    const desc = document.createElement("div");
+    desc.className = "tdesc";
+    desc.textContent = t.description;
+    item.appendChild(name);
+    item.appendChild(desc);
+    toolsList.appendChild(item);
+  }
+}
+loadTools();
 
 roleSelect.addEventListener("change", async () => {
   await fetch("/api/role", {
@@ -218,13 +301,6 @@ resetBtn.addEventListener("click", async () => {
   await fetch("/api/reset", { method: "POST" });
   messagesEl.innerHTML = "";
   addMessage("(history cleared)", "pending");
-});
-
-toolsBtn.addEventListener("click", async () => {
-  const res = await fetch("/api/tools");
-  const data = await res.json();
-  const lines = data.tools.map((t) => "- " + t.name + ": " + t.description);
-  addMessage("Available tools:\n" + lines.join("\n"), "pending");
 });
 </script>
 </body>

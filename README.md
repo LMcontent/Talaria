@@ -115,15 +115,21 @@ python -m talaria.web
 ```
 
 Then open http://127.0.0.1:5000 (or whatever `WEB_HOST`/`WEB_PORT` you set).
-It's the same `Agent` and tools as the CLI — just a different front end —
-including memory, roles (switchable from a dropdown in the header), and
-`propose_skill`. Responses stream into the browser live, the same as the
-terminal does. Reopening the page reloads the saved conversation into the
-chat window (not just into the model's context) so what you see matches
-what it actually remembers. Assistant replies render basic Markdown
-(`**bold**`, `` `code` ``, `- ` bullet lists) instead of showing the raw
-asterisks/backticks — a small dependency-free renderer built into the page
-itself, no CDN involved.
+It's the same `Agent` and tools as the CLI — just a different front end.
+Layout is a sidebar (role switcher, reset button, and the full tool list
+with descriptions, always visible) plus a centered chat column, similar to
+Claude Code's UI, rather than a chat that stretches the full browser width.
+Reopening the page reloads the saved conversation into the chat window
+(not just into the model's context) so what you see matches what it
+actually remembers.
+
+Assistant replies render basic Markdown (`# `/`## `/`### ` headings,
+`**bold**`, `` `code` ``, `- ` bullet lists) instead of showing the raw
+punctuation — a small dependency-free renderer built into the page itself,
+no CDN involved. Only your own messages get the blue bubble; assistant
+replies flow as plain text, unboxed. While a reply is streaming, the page
+only auto-scrolls if you were already at the bottom — scroll up to read
+earlier messages and it won't yank you back down mid-generation.
 
 **Important:** confirmation prompts for `run_python` and `propose_skill`
 still appear in the **terminal window running the server**, not in the
