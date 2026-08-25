@@ -126,18 +126,27 @@ reloads the saved conversation into the chat window (not just into the
 model's context) so what you see matches what it actually remembers.
 
 Assistant replies render basic Markdown (`# `/`## `/`### ` headings,
-`**bold**`, `` `code` ``, `- ` bullet lists, and fenced ` ```python ` code
-blocks) instead of showing the raw punctuation — a small dependency-free
-renderer built into the page itself, no CDN involved. Fenced code blocks
-render in a bordered, horizontally-scrollable block with basic syntax
-highlighting for Python (keywords/strings/comments/numbers); any other
-language still gets the bordered block, just without coloring. Only your
-own messages get the blue bubble; assistant replies flow as plain text,
-unboxed. While a reply is streaming, the page only auto-scrolls if you
-were already at the bottom — scroll up to read earlier messages and it
-won't yank you back down mid-generation. Chat text is sized a bit larger
-than the sidebar's default for comfortable reading; the sidebar itself
-runs noticeably larger still, since it's mostly short labels.
+`**bold**`, `` `code` ``, `- ` bullet lists, GFM-style `| a | b |` tables,
+and fenced ` ```python ` code blocks) instead of showing the raw
+punctuation — a small dependency-free renderer built into the page
+itself, no CDN involved. Tables render as real bordered `<table>`s
+(header row, optional column alignment from `:---`/`:---:`/`---:` in the
+separator row), scrolling horizontally on their own if they're wider than
+the chat column rather than squeezing it. Fenced code blocks render in a
+bordered, horizontally-scrollable block with basic syntax highlighting
+for Python (keywords/strings/comments/numbers); any other language still
+gets the bordered block, just without coloring. Only your own messages
+get the blue bubble; assistant replies flow as plain text, unboxed. While
+a reply is streaming, the page only auto-scrolls if you were already at
+the bottom — scroll up to read earlier messages and it won't yank you
+back down mid-generation. Chat text is sized a bit larger than the
+sidebar's default for comfortable reading; the sidebar itself runs
+noticeably larger still, since it's mostly short labels.
+
+The message box grows as you type (up to a max height, then scrolls) so a
+long or pasted message stays fully visible instead of scrolling inside a
+single fixed-height line. Enter sends the message; Shift+Enter inserts a
+newline instead.
 
 The Send button turns into a **Stop** button while a reply is generating —
 click it (or press Enter again) to cut generation short mid-answer. This

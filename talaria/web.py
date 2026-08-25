@@ -111,6 +111,10 @@ INDEX_HTML = r"""<!doctype html>
   .msg .tok-n { color: #986801; }
   .msg ul { margin: 4px 0; padding-left: 20px; }
   .msg li { margin: 2px 0; }
+  .msg .table-wrap { overflow-x: auto; max-width: 100%; margin: 6px 0; }
+  .msg table { border-collapse: collapse; font-size: 0.9em; }
+  .msg th, .msg td { border: 1px solid rgba(0, 0, 0, 0.15); padding: 6px 10px; text-align: left; }
+  .msg th { font-weight: 600; background: rgba(0, 0, 0, 0.04); }
   .msg h1, .msg h2, .msg h3 { margin: 0.5em 0 0.25em; line-height: 1.3; }
   .msg h1 { font-size: 1.3em; }
   .msg h2 { font-size: 1.15em; }
@@ -120,7 +124,10 @@ INDEX_HTML = r"""<!doctype html>
     display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid #ddd;
     background: #fff; flex-shrink: 0;
   }
-  #input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 17.5px; }
+  #input {
+    flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 17.5px;
+    font-family: inherit; resize: none; overflow-y: auto; max-height: 200px; line-height: 1.4;
+  }
   #send { padding: 10px 18px; border-radius: 8px; border: none; background: #2b6cb0; color: #fff; font-size: 17.5px; cursor: pointer; }
   #send:disabled { opacity: 0.5; cursor: default; }
   #send.stop { background: #a4231d; }
@@ -142,6 +149,8 @@ INDEX_HTML = r"""<!doctype html>
     .msg .tok-s { color: #98c379; }
     .msg .tok-c { color: #7f848e; }
     .msg .tok-n { color: #d19a66; }
+    .msg th, .msg td { border-color: rgba(255, 255, 255, 0.15); }
+    .msg th { background: rgba(255, 255, 255, 0.06); }
   }
 </style>
 </head>
@@ -176,7 +185,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div id="messages"><div id="messages-inner"></div></div>
   <form id="composer">
-    <input id="input" type="text" placeholder="Type a message…" autocomplete="off">
+    <textarea id="input" placeholder="Type a message… (Shift+Enter for a new line)" rows="1"></textarea>
     <button id="send" type="submit">Send</button>
   </form>
 </div>
@@ -215,10 +224,52 @@ function highlightCode(code, lang) {
   });
 }
 
+// Turns one GFM-style pipe table (header row + |---|---| separator row +
+// zero or more data rows, already split apart by the caller) into a real
+// <table>. The separator row may carry alignment markers (:---, :---:,
+// ---:), reflected as a text-align style on the matching column.
+function renderTable(block) {
+  const lines = block.split("\n").filter((l) => l.trim() !== "");
+  if (lines.length < 2) return null;
+
+  const splitRow = (line) => {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map((c) => c.trim());
+  };
+
+  const header = splitRow(lines[0]);
+  const aligns = splitRow(lines[1]).map((c) => {
+    const left = c.startsWith(":");
+    const right = c.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    if (left) return "left";
+    return "";
+  });
+  const dataRows = lines.slice(2).map(splitRow);
+
+  const cell = (tag, c, i) =>
+    "<" + tag + (aligns[i] ? ' style="text-align:' + aligns[i] + '"' : "") + ">" + c + "</" + tag + ">";
+
+  let html = "<table><thead><tr>";
+  html += header.map((c, i) => cell("th", c, i)).join("");
+  html += "</tr></thead>";
+  if (dataRows.length) {
+    html += "<tbody>";
+    html += dataRows.map((row) => "<tr>" + row.map((c, i) => cell("td", c, i)).join("") + "</tr>").join("");
+    html += "</tbody>";
+  }
+  html += "</table>";
+  return '<div class="table-wrap">' + html + "</div>";
+}
+
 // Small, dependency-free renderer for the subset of Markdown models
-// actually use in replies: headings, inline/fenced code, bold, italic, and
-// "- " bullet lists. Input is HTML-escaped first, so nothing the model
-// writes can inject markup — the only tags produced come from here.
+// actually use in replies: headings, inline/fenced code, bold, italic,
+// tables, and "- " bullet lists. Input is HTML-escaped first, so nothing
+// the model writes can inject markup — the only tags produced come from
+// here.
 function renderMarkdown(text) {
   let html = escapeHtml(text);
 
@@ -236,6 +287,13 @@ function renderMarkdown(text) {
   html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+  html = html.replace(
+    /(^|\n)(\|[^\n]*\|[ \t]*\n\|[ \t:|-]+\|[ \t]*\n(?:\|[^\n]*\|[ \t]*(?:\n|$))*)/g,
+    (match, pre, block) => {
+      const rendered = renderTable(block);
+      return rendered ? pre + rendered : match;
+    }
+  );
   html = html.replace(/(^|\n)### (.*)/g, (_, pre, t) => pre + "<h3>" + t + "</h3>");
   html = html.replace(/(^|\n)## (.*)/g, (_, pre, t) => pre + "<h2>" + t + "</h2>");
   html = html.replace(/(^|\n)# (.*)/g, (_, pre, t) => pre + "<h1>" + t + "</h1>");
@@ -281,6 +339,26 @@ function renderMarkdown(text) {
   });
 })();
 
+// Grows the composer textarea to fit what's typed (up to the CSS
+// max-height, beyond which it scrolls internally instead), and shrinks it
+// back down as text is deleted — so a long pasted message stays fully
+// visible instead of scrolling inside a single fixed-height line.
+function autoGrowInput() {
+  input.style.height = "auto";
+  input.style.height = input.scrollHeight + "px";
+}
+input.addEventListener("input", autoGrowInput);
+
+// Enter sends the message (like a normal chat input); Shift+Enter inserts
+// a literal newline instead, since a plain <textarea> would otherwise
+// just add a newline on every Enter and never submit.
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
 function isNearBottom() {
   return scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 80;
 }
@@ -323,6 +401,7 @@ form.addEventListener("submit", async (e) => {
   if (!text) return;
   addMessage(text, "user");
   input.value = "";
+  autoGrowInput();
   input.disabled = true;
   generating = true;
   stopRequested = false;
