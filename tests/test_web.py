@@ -26,6 +26,7 @@ def make_config(tmp_path, **overrides) -> Config:
         openai_compat_model="x",
         openai_compat_dns_pin=False,
         openai_compat_dns_servers=[],
+        openai_compat_timeout_seconds=120.0,
         confirm_code_exec=False,
         max_history_turns=30,
         default_role="assistant",

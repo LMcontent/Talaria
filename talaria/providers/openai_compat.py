@@ -20,6 +20,7 @@ class OpenAICompatProvider(Provider):
         model: str,
         dns_pin: bool = False,
         dns_servers: list[str] | None = None,
+        timeout_seconds: float = 120.0,
     ):
         if dns_pin:
             from talaria.providers.dns_pin import pin_base_url
@@ -30,6 +31,14 @@ class OpenAICompatProvider(Provider):
         # Flaky routers/proxies can drop the connection mid-response — retry
         # a few times before giving up, and allow slow "stealth" models room
         # to respond instead of timing out early.
+        #
+        # timeout_seconds: 120s is plenty for a cloud router, but a local
+        # server (LM Studio, Ollama, ...) on consumer hardware genuinely
+        # needs longer — it reprocesses the whole prompt (including
+        # Talaria's full tool schema list) from scratch on every request,
+        # which alone can take a minute or more on a modest GPU before any
+        # generation even starts. Raise OPENAI_COMPAT_TIMEOUT_SECONDS for
+        # that case rather than hitting a client-side "timed out".
         #
         # max_keepalive_connections=0 disables HTTP keep-alive so every
         # request opens a fresh TCP/TLS connection instead of reusing one
@@ -42,7 +51,7 @@ class OpenAICompatProvider(Provider):
             api_key=api_key,
             base_url=base_url,
             max_retries=5,
-            timeout=120.0,
+            timeout=timeout_seconds,
             http_client=DefaultHttpxClient(
                 limits=httpx2.Limits(max_keepalive_connections=0, max_connections=10)
             ),
