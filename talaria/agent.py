@@ -113,7 +113,22 @@ class Agent:
         tool = self.tools_by_name.get(name)
         if tool is None:
             return f"Error: unknown tool {name!r}"
+        # Printed unconditionally (not just via on_chunk/streaming) so it's
+        # always visible in the terminal — the only way to tell "the model
+        # actually called this tool" from "the model just said in text that
+        # it would", which matters a lot with local/smaller models that
+        # sometimes narrate an action instead of emitting a real tool call.
+        print(f"\n[tool] {_format_tool_call(name, tool_input)}", flush=True)
         try:
             return str(tool.handler(**tool_input))
         except Exception as e:
             return f"Error running tool {name}: {e}"
+
+
+def _format_tool_call(name: str, tool_input: dict) -> str:
+    def fmt(value):
+        s = repr(value)
+        return s if len(s) <= 80 else s[:77] + "..."
+
+    args = ", ".join(f"{k}={fmt(v)}" for k, v in tool_input.items())
+    return f"{name}({args})"
