@@ -23,6 +23,7 @@ class Config:
     openai_compat_model: str
     openai_compat_dns_pin: bool
     openai_compat_dns_servers: list[str]
+    openai_compat_timeout_seconds: float
 
     confirm_code_exec: bool
     max_history_turns: int
@@ -74,6 +75,9 @@ def load_config() -> Config:
         openai_compat_dns_pin=_parse_bool(os.environ.get("OPENAI_COMPAT_DNS_PIN", "false")),
         openai_compat_dns_servers=_parse_list(
             os.environ.get("OPENAI_COMPAT_DNS_SERVERS", "")
+        ),
+        openai_compat_timeout_seconds=float(
+            os.environ.get("OPENAI_COMPAT_TIMEOUT_SECONDS", "120")
         ),
         confirm_code_exec=_parse_bool(os.environ.get("CONFIRM_CODE_EXEC", "true")),
         max_history_turns=int(os.environ.get("MAX_HISTORY_TURNS", "30")),

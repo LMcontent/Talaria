@@ -218,6 +218,34 @@ visible thinking summary (`claude-opus-5`, the default, does; an
 older/different `CLAUDE_MODEL` may reject the request — only turn this on
 if you know your model supports it).
 
+### Local models (LM Studio, Ollama, ...)
+
+`OPENAI_COMPAT_BASE_URL` doesn't have to be a cloud router — anything that
+speaks the OpenAI-compatible chat-completions API works, including a local
+server on your own machine or LAN. For LM Studio: enable the Local Server
+tab, point `OPENAI_COMPAT_BASE_URL` at it (`http://127.0.0.1:1234/v1` on
+the same machine, or `http://<its LAN IP>:1234/v1` from another machine —
+turn on "Serve on Local Network" in LM Studio for that), set
+`OPENAI_COMPAT_MODEL` to the exact id from `http://<host>:1234/v1/models`,
+and `OPENAI_COMPAT_API_KEY` to any non-empty placeholder (local servers
+don't check it). Ollama works the same way against its own
+OpenAI-compatible endpoint.
+
+Local inference on consumer hardware is a different performance profile
+than a cloud API: it reprocesses the *entire* prompt (full conversation
+history plus Talaria's tool list) from scratch on every single request,
+with no server-side caching across turns — for a long conversation that
+alone can take well over a minute on a single consumer GPU, before any
+generation even starts. If you see `timed out` errors, raise
+`OPENAI_COMPAT_TIMEOUT_SECONDS` (default 120; try 600 for a local model).
+It also helps to lower `MAX_HISTORY_TURNS` and `MAX_TURNS` so there's
+simply less prompt to reprocess each time. Not every local model handles
+tool calling reliably either — if the agent never actually calls
+`web_search`/`run_python`/etc. and just describes doing so in text, that's
+usually the model, not Talaria; models built for agentic/tool use (e.g.
+Qwen2.5+/3.x-Instruct, Llama 3.1+-Instruct, `gpt-oss`) tend to do better
+here than general-purpose chat models.
+
 ### Sandbox environment (run_python / install_package)
 
 `run_python` executes in a dedicated virtual environment at
@@ -397,8 +425,10 @@ just Python's bundled ensurepip, so this stays offline too), confirming
 it can't see Talaria's own installed packages. `ClaudeProvider` itself is
 also covered against a fake stream object (text/thinking event handling,
 `CLAUDE_SHOW_THINKING`/`CLAUDE_EFFORT` request params, cancellation, usage
-extraction) — no API key needed there either, since it never opens a real
-connection. Run the suite after changing `talaria/` before pushing, same
+extraction), and `OpenAICompatProvider`'s message conversion and
+`OPENAI_COMPAT_TIMEOUT_SECONDS` wiring are covered directly — no API key
+needed for either, since neither opens a real connection. Run the suite
+after changing `talaria/` before pushing, same
 idea as `py_compile`/`pyflakes` but for behavior instead of syntax.
 
 ### Architecture

@@ -36,6 +36,7 @@ def make_provider(config: Config) -> Provider:
             model=config.openai_compat_model,
             dns_pin=config.openai_compat_dns_pin,
             dns_servers=config.openai_compat_dns_servers,
+            timeout_seconds=config.openai_compat_timeout_seconds,
         )
 
     raise ValueError(f"Unknown LLM_PROVIDER: {config.provider!r} (use 'claude' or 'openai_compat')")

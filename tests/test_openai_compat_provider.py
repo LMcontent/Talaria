@@ -7,7 +7,23 @@ or an array of content parts."
 """
 
 from talaria.providers.base import ToolCall
-from talaria.providers.openai_compat import _to_openai_messages
+from talaria.providers.openai_compat import OpenAICompatProvider, _to_openai_messages
+
+
+def test_timeout_seconds_defaults_to_120():
+    provider = OpenAICompatProvider(api_key="x", base_url="http://example.invalid", model="x")
+    assert provider.client.timeout == 120.0
+
+
+def test_timeout_seconds_is_configurable():
+    # Regression coverage: a local server (LM Studio, Ollama, ...) on
+    # consumer hardware reprocesses the whole prompt from scratch every
+    # request, which can genuinely take minutes on a large conversation —
+    # the fixed 120s the client used to hardcode was too short for that.
+    provider = OpenAICompatProvider(
+        api_key="x", base_url="http://example.invalid", model="x", timeout_seconds=600.0
+    )
+    assert provider.client.timeout == 600.0
 
 
 def test_user_message_passthrough():
