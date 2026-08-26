@@ -263,10 +263,13 @@ Add more in `talaria/roles.py`.
 Drop a `*.py` file into `SKILLS_DIR` (default `./skills`) defining a
 top-level `TOOLS: list[ToolSpec]` and it's loaded automatically on startup
 — no changes to Talaria itself needed. See `skills/example_time.py`
-for the pattern. `/tools` in the CLI lists everything currently loaded,
-built-in and skill-provided alike. A skill file that fails to import is
-skipped with a `[skills] failed to load ...` message — it doesn't take
-down the others.
+for the pattern; `skills/roman_numerals.py` and `skills/wolfram_alpha.py`
+are two more small examples (the latter needs a free `WOLFRAM_APPID` in
+`.env` — see `.env.example` — and returns a clear error instead of
+failing silently if it's not set). `/tools` in the CLI lists everything
+currently loaded, built-in and skill-provided alike. A skill file that
+fails to import is skipped with a `[skills] failed to load ...` message
+— it doesn't take down the others.
 
 ### Self-authored skills
 
@@ -398,6 +401,8 @@ talaria/
   web.py                 # local browser chat UI (Flask), same Agent/tools as the CLI
 skills/
   example_time.py        # example pluggable skill — see Skills above
+  roman_numerals.py       # another small example skill
+  wolfram_alpha.py        # example skill needing WOLFRAM_APPID in .env
 tests/
   conftest.py             # ScriptedProvider/RaisingProvider fakes shared by the suite
   test_*.py                # see Tests above
