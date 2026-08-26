@@ -19,6 +19,8 @@ def make_config(tmp_path, **overrides) -> Config:
         notes_file=str(tmp_path / ".notes.json"),
         claude_api_key=None,
         claude_model="x",
+        claude_show_thinking=False,
+        claude_effort="",
         openai_compat_base_url="http://example.invalid",
         openai_compat_api_key=None,
         openai_compat_model="x",
