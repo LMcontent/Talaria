@@ -244,7 +244,11 @@ tool calling reliably either — if the agent never actually calls
 `web_search`/`run_python`/etc. and just describes doing so in text, that's
 usually the model, not Talaria; models built for agentic/tool use (e.g.
 Qwen2.5+/3.x-Instruct, Llama 3.1+-Instruct, `gpt-oss`) tend to do better
-here than general-purpose chat models.
+here than general-purpose chat models. Every tool call that actually runs
+prints `[tool] name(args)` to the terminal, so you can tell this apart from
+the model just narrating an action in its reply text — if the reply
+mentions writing a file but no matching `[tool] write_document(...)` line
+appeared, the model never really called it.
 
 ### Sandbox environment (run_python / install_package)
 

@@ -63,6 +63,54 @@ def test_tool_call_round_trip():
     assert provider.calls[1]["history"][2]["content"] == "echo:hi"
 
 
+def test_tool_call_is_logged_to_the_terminal(capsys):
+    # The only way to tell "the model actually called this tool" from "the
+    # model just described doing so in text" — matters most with
+    # local/smaller models that sometimes narrate instead of calling.
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(
+                text="", tool_calls=[ToolCall(id="1", name="echo", input={"x": "hi"})]
+            ),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(provider, tools=[_echo_tool()], system="sys")
+
+    agent.run("go")
+
+    out = capsys.readouterr().out
+    assert "[tool] echo(x='hi')" in out
+
+
+def test_long_tool_call_arguments_are_truncated_in_the_log(capsys):
+    tool = ToolSpec(
+        name="write_document",
+        description="d",
+        input_schema={"type": "object", "properties": {}},
+        handler=lambda **kw: "written",
+    )
+    long_content = "x" * 500
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(id="1", name="write_document", input={"content": long_content})
+                ],
+            ),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(provider, tools=[tool], system="sys")
+
+    agent.run("go")
+
+    out = capsys.readouterr().out
+    assert "..." in out
+    assert long_content not in out
+
+
 def test_unknown_tool_reports_error_without_crashing():
     provider = ScriptedProvider(
         [
