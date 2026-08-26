@@ -195,6 +195,29 @@ running any code the model generated — the code runs with your OS-level
 permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
 in `.env` to skip the prompt (only if you fully trust the model/provider).
 
+### Reasoning depth and turn limits
+
+Genuinely multi-step or creative tasks (several tool calls, install a
+package, run it, fix the error, try again...) need more room than a quick
+question does. `MAX_TURNS` (default 25) is how many model-call rounds a
+single turn gets before the agent gives up with `[stopped: reached
+max_turns]`; `MAX_DELEGATE_DEPTH` (default 3) is how many levels deep
+`delegate_task` sub-agents can delegate further. Raise either in `.env`
+for longer/deeper tool-chains — pair with `MAX_SESSION_TOKENS` (see
+Usage above) if you're on a metered key and want a backstop against a
+runaway loop.
+
+With `LLM_PROVIDER=claude`, `CLAUDE_EFFORT` (`low`/`medium`/`high`
+(default)/`xhigh`/`max`) controls how hard the model thinks before
+answering — higher can improve quality on hard/creative problems, at more
+tokens and latency. `CLAUDE_SHOW_THINKING=true` prints the model's
+reasoning to the terminal (wrapped in `[thinking] ... [/thinking]`
+markers) as it streams, before the actual answer — off by default since
+it's a lot of extra text, and it only works on models that support a
+visible thinking summary (`claude-opus-5`, the default, does; an
+older/different `CLAUDE_MODEL` may reject the request — only turn this on
+if you know your model supports it).
+
 ### Sandbox environment (run_python / install_package)
 
 `run_python` executes in a dedicated virtual environment at
@@ -371,9 +394,12 @@ real cancellation from a second thread, not a mocked one), and the
 `run_python`/`install_package` sandbox — a real venv is actually created
 and code actually executed in it (venv creation itself needs no network,
 just Python's bundled ensurepip, so this stays offline too), confirming
-it can't see Talaria's own installed packages. Run it after changing
-`talaria/` before pushing, same idea as `py_compile`/`pyflakes` but for
-behavior instead of syntax.
+it can't see Talaria's own installed packages. `ClaudeProvider` itself is
+also covered against a fake stream object (text/thinking event handling,
+`CLAUDE_SHOW_THINKING`/`CLAUDE_EFFORT` request params, cancellation, usage
+extraction) — no API key needed there either, since it never opens a real
+connection. Run the suite after changing `talaria/` before pushing, same
+idea as `py_compile`/`pyflakes` but for behavior instead of syntax.
 
 ### Architecture
 

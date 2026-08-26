@@ -10,7 +10,12 @@ def make_provider(config: Config) -> Provider:
             raise RuntimeError(
                 "LLM_PROVIDER=claude but ANTHROPIC_API_KEY is not set (see .env.example)"
             )
-        return ClaudeProvider(api_key=config.claude_api_key, model=config.claude_model)
+        return ClaudeProvider(
+            api_key=config.claude_api_key,
+            model=config.claude_model,
+            show_thinking=config.claude_show_thinking,
+            effort=config.claude_effort,
+        )
 
     if config.provider == "openai_compat":
         from talaria.providers.openai_compat import OpenAICompatProvider

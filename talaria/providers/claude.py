@@ -9,7 +9,7 @@ from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpe
 
 
 class ClaudeProvider(Provider):
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, show_thinking: bool = False, effort: str = ""):
         # max_keepalive_connections=0: fresh TCP/TLS connection per request
         # instead of a reused pooled one — see the identical comment in
         # openai_compat.py for why (a filter that kills one specific
@@ -21,6 +21,8 @@ class ClaudeProvider(Provider):
             ),
         )
         self.model = model
+        self.show_thinking = show_thinking
+        self.effort = effort
 
     def chat(
         self,
@@ -30,28 +32,54 @@ class ClaudeProvider(Provider):
         on_chunk: Callable[[str], None] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
-        with self.client.messages.stream(
+        stream_kwargs: dict = dict(
             model=self.model,
             max_tokens=16000,
             system=system,
             messages=_to_anthropic_messages(history),
             tools=[_to_anthropic_tool(t) for t in tools] if tools else anthropic.NOT_GIVEN,
-        ) as stream:
+        )
+        if self.show_thinking:
+            # display="summarized" is required to get non-empty thinking
+            # text back at all on Claude Opus 5 (and Fable 5/Opus 4.8/4.7)
+            # — they otherwise default to "omitted" (thinking still
+            # happens and is billed, the text just comes back empty).
+            # Only tested against adaptive-thinking-capable models; see
+            # CLAUDE_SHOW_THINKING in .env.example.
+            stream_kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+        if self.effort:
+            stream_kwargs["output_config"] = {"effort": self.effort}
+
+        with self.client.messages.stream(**stream_kwargs) as stream:
             text_parts: list[str] = []
             cancelled = False
-            for text_chunk in stream.text_stream:
-                text_parts.append(text_chunk)
-                print(text_chunk, end="", flush=True)
-                if on_chunk:
-                    on_chunk(text_chunk)
+            thinking_open = False
+            for event in stream:
+                if event.type == "content_block_delta":
+                    if event.delta.type == "text_delta":
+                        if thinking_open:
+                            print("\n[/thinking]\n", end="", flush=True)
+                            thinking_open = False
+                        text_parts.append(event.delta.text)
+                        print(event.delta.text, end="", flush=True)
+                        if on_chunk:
+                            on_chunk(event.delta.text)
+                    elif event.delta.type == "thinking_delta":
+                        if not thinking_open:
+                            print("\n[thinking] ", end="", flush=True)
+                            thinking_open = True
+                        print(event.delta.thinking, end="", flush=True)
                 if cancel_event and cancel_event.is_set():
                     cancelled = True
                     break
 
+            if thinking_open:
+                print("\n[/thinking]\n", end="", flush=True)
+
             if cancelled:
                 # get_final_message() needs the stream to have run to
                 # completion (message_stop) to assemble its result — since
-                # we broke out early, use what text_stream already gave us
+                # we broke out early, use what we accumulated ourselves
                 # instead. Leaving the `with` block closes the connection.
                 return ProviderResponse(text="".join(text_parts), tool_calls=[], cancelled=True)
 

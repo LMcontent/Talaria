@@ -15,6 +15,8 @@ class Config:
 
     claude_api_key: str | None
     claude_model: str
+    claude_show_thinking: bool
+    claude_effort: str
 
     openai_compat_base_url: str
     openai_compat_api_key: str | None
@@ -31,8 +33,8 @@ class Config:
     web_host: str
     web_port: int
 
-    max_turns: int = 15
-    max_delegate_depth: int = 2
+    max_turns: int = 25
+    max_delegate_depth: int = 3
 
     max_session_tokens: int = 0
     token_price_input_per_m: float = 0.0
@@ -60,6 +62,8 @@ def load_config() -> Config:
         ),
         claude_api_key=os.environ.get("ANTHROPIC_API_KEY"),
         claude_model=os.environ.get("CLAUDE_MODEL", "claude-opus-5"),
+        claude_show_thinking=_parse_bool(os.environ.get("CLAUDE_SHOW_THINKING", "false")),
+        claude_effort=os.environ.get("CLAUDE_EFFORT", "").strip().lower(),
         openai_compat_base_url=os.environ.get(
             "OPENAI_COMPAT_BASE_URL", "https://openrouter.ai/api/v1"
         ),
@@ -80,4 +84,6 @@ def load_config() -> Config:
         max_session_tokens=int(os.environ.get("MAX_SESSION_TOKENS", "0")),
         token_price_input_per_m=float(os.environ.get("TOKEN_PRICE_INPUT_PER_M", "0")),
         token_price_output_per_m=float(os.environ.get("TOKEN_PRICE_OUTPUT_PER_M", "0")),
+        max_turns=int(os.environ.get("MAX_TURNS", "25")),
+        max_delegate_depth=int(os.environ.get("MAX_DELEGATE_DEPTH", "3")),
     )
