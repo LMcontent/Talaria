@@ -151,7 +151,12 @@ def _to_openai_messages(history: list[dict]) -> list[dict]:
         if role == "user":
             messages.append({"role": "user", "content": entry["content"]})
         elif role == "assistant":
-            msg: dict = {"role": "assistant", "content": entry.get("content") or None}
+            # Some OpenAI-compatible backends reject content: null outright
+            # ("content must be a string or an array of content parts")
+            # even for a tool-calls-only assistant turn, where the
+            # official OpenAI API itself accepts null — use "" instead,
+            # which every backend accepts and means the same thing here.
+            msg: dict = {"role": "assistant", "content": entry.get("content") or ""}
             tool_calls = entry.get("tool_calls", [])
             if tool_calls:
                 msg["tool_calls"] = [
