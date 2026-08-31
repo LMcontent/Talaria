@@ -37,6 +37,9 @@ class Config:
     max_turns: int = 25
     max_delegate_depth: int = 3
 
+    autonomous_mode: bool = False
+    autonomous_interval_minutes: float = 60.0
+
     max_session_tokens: int = 0
     token_price_input_per_m: float = 0.0
     token_price_output_per_m: float = 0.0
@@ -90,4 +93,6 @@ def load_config() -> Config:
         token_price_output_per_m=float(os.environ.get("TOKEN_PRICE_OUTPUT_PER_M", "0")),
         max_turns=int(os.environ.get("MAX_TURNS", "25")),
         max_delegate_depth=int(os.environ.get("MAX_DELEGATE_DEPTH", "3")),
+        autonomous_mode=_parse_bool(os.environ.get("AUTONOMOUS_MODE", "false")),
+        autonomous_interval_minutes=float(os.environ.get("AUTONOMOUS_INTERVAL_MINUTES", "60")),
     )
