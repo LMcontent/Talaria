@@ -3,15 +3,13 @@
 Fuzzy lookup via token-Jaccard similarity with LIGHT RU/EN STEMMING + TTL.
 v2 fix: Russian morphology defeated exact-token matching ('metallov' vs
 'metally'), so tokens are now stemmed before comparison. ё is normalized."""
-import json
-import os
 import re
 from datetime import datetime, timedelta, timezone
 
+from talaria.json_store import load_json, save_json
 from talaria.providers.base import ToolSpec
 
-_DIR = os.path.join(".", "state")
-_FILE = os.path.join(_DIR, "cache.json")
+_FILE = "cache.json"
 
 _STOP = {"the", "a", "an", "of", "in", "on", "at", "for", "to",
          "i", "v", "na", "po", "dlya", "s", "pro", "kak", "chto"}
@@ -76,24 +74,14 @@ def _jaccard(a, b):
 
 
 def _load():
-    if not os.path.isfile(_FILE):
+    d = load_json(_FILE)
+    if not isinstance(d, dict) or not isinstance(d.get("entries"), list):
         return {"entries": []}
-    try:
-        with open(_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict) or not isinstance(d.get("entries"), list):
-            return {"entries": []}
-        return d
-    except Exception:
-        return {"entries": []}
+    return d
 
 
 def _save(db):
-    os.makedirs(_DIR, exist_ok=True)
-    tmp = _FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _FILE)
+    save_json(_FILE, db)
 
 
 def cache_put(query: str = "", value: str = "", ttl_hours: str = "24") -> str:

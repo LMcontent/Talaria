@@ -5,14 +5,12 @@ Unlike long-term memory (durable facts), the shift log carries the state of
 unfinished business: where you stopped, what's next, what's unresolved.
 Stored in ./state/shifts.json (last 30 shifts kept).
 """
-import json
-import os
 from datetime import datetime, timezone
 
+from talaria.json_store import load_json, save_json
 from talaria.providers.base import ToolSpec
 
-_DIR = os.path.join(".", "state")
-_FILE = os.path.join(_DIR, "shifts.json")
+_FILE = "shifts.json"
 _UTC = timezone.utc
 
 
@@ -21,24 +19,14 @@ def _now_iso():
 
 
 def _load():
-    if not os.path.isfile(_FILE):
+    d = load_json(_FILE)
+    if not isinstance(d, dict) or not isinstance(d.get("shifts"), list):
         return {"shifts": []}
-    try:
-        with open(_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict) or not isinstance(d.get("shifts"), list):
-            return {"shifts": []}
-        return d
-    except Exception:
-        return {"shifts": []}
+    return d
 
 
 def _save(db):
-    os.makedirs(_DIR, exist_ok=True)
-    tmp = _FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _FILE)
+    save_json(_FILE, db)
 
 
 def _to_items(v):

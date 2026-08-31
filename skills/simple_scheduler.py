@@ -6,15 +6,14 @@ actionable when a session runs `task_tick` (e.g. at the start of a dialog):
 it returns due tasks with their instructions for immediate execution.
 Recurring tasks reschedule themselves by an hourly interval.
 """
-import json
-import os
 from datetime import datetime, timedelta, timezone
 
 import talaria.providers.base as base
+from talaria.json_store import load_json, save_json
+
 ToolSpec = base.ToolSpec
 
-_TASKS_DIR = os.path.join(".", "state")
-_TASKS_FILE = os.path.join(_TASKS_DIR, "tasks.json")
+_FILE = "tasks.json"
 _UTC = timezone.utc
 
 
@@ -40,22 +39,12 @@ def _parse_when(s):
 
 
 def _load():
-    if not os.path.isfile(_TASKS_FILE):
-        return []
-    try:
-        with open(_TASKS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    tasks = load_json(_FILE)
+    return tasks if isinstance(tasks, list) else []
 
 
 def _save(tasks):
-    os.makedirs(_TASKS_DIR, exist_ok=True)
-    tmp = _TASKS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _TASKS_FILE)
+    save_json(_FILE, tasks)
 
 
 def task_add(name: str = "", instruction: str = "", interval_hours: str = "", due_iso: str = "") -> str:
