@@ -10,7 +10,9 @@ reuses the exact same Agent/tool code as the CLI; only the transport is
 different.
 """
 
+import os
 import queue
+import subprocess
 import sys
 import threading
 
@@ -56,10 +58,11 @@ INDEX_HTML = r"""<!doctype html>
     width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid #ccc;
     background: #fff; font-size: 19.5px;
   }
-  #reset-btn {
+  #reset-btn, #open-workspace-btn {
     width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc;
     background: #fff; cursor: pointer; font-size: 19.5px;
   }
+  #open-workspace-btn { margin-top: 8px; }
   .tool-item { padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 18px; }
   .tool-item:last-child { border-bottom: none; }
   .tool-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
@@ -137,7 +140,7 @@ INDEX_HTML = r"""<!doctype html>
     #sidebar { background: #1b1c20; border-color: #2c2d31; }
     #sidebar .meta { color: #999; }
     .sidebar-section-title { color: #888; }
-    #role-select, #reset-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
+    #role-select, #reset-btn, #open-workspace-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
     .tool-item { border-color: #2c2d31; }
     .tool-item .tdesc { color: #999; }
     #usage-box { color: #aaa; }
@@ -168,6 +171,7 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div class="sidebar-section">
     <button id="reset-btn" type="button">Reset history</button>
+    <button id="open-workspace-btn" type="button" title="Opens the workspace folder on the machine running this server">Open workspace folder</button>
   </div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">Usage</div>
@@ -197,6 +201,7 @@ const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const roleSelect = document.getElementById("role-select");
 const resetBtn = document.getElementById("reset-btn");
+const openWorkspaceBtn = document.getElementById("open-workspace-btn");
 const toolsList = document.getElementById("tools-list");
 const usageBox = document.getElementById("usage-box");
 const sidebar = document.getElementById("sidebar");
@@ -523,6 +528,21 @@ resetBtn.addEventListener("click", async () => {
   messagesEl.innerHTML = "";
   addMessage("(history cleared)", "pending");
 });
+
+openWorkspaceBtn.addEventListener("click", async () => {
+  openWorkspaceBtn.disabled = true;
+  try {
+    const res = await fetch("/api/open-workspace", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      addMessage("Could not open workspace folder: " + data.error, "error");
+    }
+  } catch (err) {
+    addMessage("Network error: " + err, "error");
+  } finally {
+    openWorkspaceBtn.disabled = false;
+  }
+});
 </script>
 </body>
 </html>
@@ -678,6 +698,25 @@ def create_app(config: Config) -> Flask:
         state["history"] = []
         clear_history(config.memory_file)
         return jsonify({"ok": True})
+
+    @app.route("/api/open-workspace", methods=["POST"])
+    def open_workspace():
+        # Opens the folder on the machine running this server, using its
+        # native file manager — makes sense for the common case (server and
+        # browser on the same machine, WEB_HOST=127.0.0.1) but note this is
+        # NOT "open on the device viewing the page" if accessed over a LAN.
+        path = os.path.abspath(config.workspace_dir)
+        os.makedirs(path, exist_ok=True)
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)  # noqa: S606 - local-only opener, no user input in path
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "path": path})
 
     @app.route("/api/role", methods=["GET", "POST"])
     def role_endpoint():

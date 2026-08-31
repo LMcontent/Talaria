@@ -120,6 +120,14 @@ Layout is a sidebar (role switcher, reset button, a live token-usage box,
 and the full tool list with descriptions, always visible) plus a centered
 chat column, similar to Claude Code's UI, rather than a chat that
 stretches the full browser width.
+
+"Open workspace folder" opens `WORKSPACE_DIR` in the file manager — the
+simplest way to hand the agent a file is to just drop it in there directly
+(it reads whatever's in that folder), rather than needing an in-chat
+upload button. Note this opens the folder **on the machine running the
+server** — if you're browsing from a different device on your network
+than the one Talaria is running on, this opens a window there, not on
+your device.
 Drag the thin strip on the sidebar's right edge to resize it — your chosen
 width is remembered in the browser for next time. Reopening the page
 reloads the saved conversation into the chat window (not just into the

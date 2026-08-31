@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 
 import pytest
@@ -256,6 +257,37 @@ def test_usage_endpoint_reports_estimated_cost_when_prices_configured(app_factor
     client.post("/api/chat", json={"message": "hello"})
 
     assert client.get("/api/usage").get_json()["estimated_cost"] == 2.0
+
+
+def test_open_workspace_creates_dir_and_launches_opener(app_factory, monkeypatch):
+    client, config, _ = app_factory([])
+    calls = []
+    monkeypatch.setattr(web.subprocess, "Popen", lambda args: calls.append(args))
+
+    resp = client.post("/api/open-workspace")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["path"] == os.path.abspath(config.workspace_dir)
+    assert os.path.isdir(config.workspace_dir)
+    assert len(calls) == 1
+
+
+def test_open_workspace_returns_500_when_opener_fails(app_factory, monkeypatch):
+    client, _, _ = app_factory([])
+
+    def boom(args):
+        raise OSError("no file manager available")
+
+    monkeypatch.setattr(web.subprocess, "Popen", boom)
+
+    resp = client.post("/api/open-workspace")
+
+    assert resp.status_code == 500
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert "no file manager" in data["error"]
 
 
 def test_session_token_limit_blocks_further_chats_without_calling_the_provider(app_factory):
