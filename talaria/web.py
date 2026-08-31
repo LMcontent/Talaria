@@ -10,6 +10,7 @@ reuses the exact same Agent/tool code as the CLI; only the transport is
 different.
 """
 
+import json
 import os
 import queue
 import subprocess
@@ -63,10 +64,17 @@ INDEX_HTML = r"""<!doctype html>
     background: #fff; cursor: pointer; font-size: 19.5px;
   }
   #open-workspace-btn { margin-top: 8px; }
-  .tool-item { padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 18px; }
-  .tool-item:last-child { border-bottom: none; }
-  .tool-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
-  .tool-item .tdesc { color: #777; margin-top: 2px; line-height: 1.35; }
+  .tool-item, .log-item { padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 18px; }
+  .tool-item:last-child, .log-item:last-child { border-bottom: none; }
+  .tool-item .tname, .log-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
+  .tool-item .tdesc, .log-item .tdesc { color: #777; margin-top: 2px; line-height: 1.35; }
+  .log-item .tname { font-family: inherit; font-weight: 400; color: #555; font-size: 0.9em; }
+
+  .sidebar-section-title a {
+    float: right; text-decoration: none; color: inherit; font-weight: 400;
+    text-transform: none; letter-spacing: normal; cursor: pointer;
+  }
+  .sidebar-section-title a:hover { color: #2b6cb0; }
 
   #usage-box { font-size: 16.5px; color: #555; line-height: 1.5; }
   #usage-box .over-limit { color: #a4231d; font-weight: 600; }
@@ -141,8 +149,10 @@ INDEX_HTML = r"""<!doctype html>
     #sidebar .meta { color: #999; }
     .sidebar-section-title { color: #888; }
     #role-select, #reset-btn, #open-workspace-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
-    .tool-item { border-color: #2c2d31; }
-    .tool-item .tdesc { color: #999; }
+    .tool-item, .log-item { border-color: #2c2d31; }
+    .tool-item .tdesc, .log-item .tdesc { color: #999; }
+    .log-item .tname { color: #999; }
+    .sidebar-section-title a:hover { color: #5a9fd4; }
     #usage-box { color: #aaa; }
     form#composer { background: #1f2126; border-color: #333; }
     #input { background: #24262c; color: #e6e6e6; border-color: #444; }
@@ -177,6 +187,13 @@ INDEX_HTML = r"""<!doctype html>
     <div class="sidebar-section-title">Usage</div>
     <div id="usage-box">Loading…</div>
   </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">
+      Autonomous log
+      <a id="autonomous-log-refresh" href="#" title="Reload — this updates outside the web UI's own requests">&#8635;</a>
+    </div>
+    <div id="autonomous-log">Loading…</div>
+  </div>
   <div class="sidebar-section sidebar-tools">
     <div class="sidebar-section-title">Tools</div>
     <div id="tools-list">Loading…</div>
@@ -204,6 +221,8 @@ const resetBtn = document.getElementById("reset-btn");
 const openWorkspaceBtn = document.getElementById("open-workspace-btn");
 const toolsList = document.getElementById("tools-list");
 const usageBox = document.getElementById("usage-box");
+const autonomousLog = document.getElementById("autonomous-log");
+const autonomousLogRefresh = document.getElementById("autonomous-log-refresh");
 const sidebar = document.getElementById("sidebar");
 const sidebarResizer = document.getElementById("sidebar-resizer");
 
@@ -494,6 +513,48 @@ async function loadUsage() {
 }
 loadUsage();
 
+// Formats an ISO-8601 UTC timestamp (as written by talaria.autonomous) in
+// the browser's own local time/format, falling back to the raw string if
+// parsing fails for some reason.
+function formatLogTimestamp(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString();
+}
+
+async function loadAutonomousLog() {
+  const res = await fetch("/api/autonomous-log");
+  const data = await res.json();
+  autonomousLog.innerHTML = "";
+  if (!data.entries.length) {
+    autonomousLog.textContent = "(no autonomous check-ins yet — see the Autonomous mode section in the README)";
+    return;
+  }
+  // Newest first, capped so an old, huge log doesn't blow up the sidebar.
+  for (const e of data.entries.slice(-20).reverse()) {
+    const item = document.createElement("div");
+    item.className = "log-item";
+    const when = document.createElement("div");
+    when.className = "tname";
+    // goal_focus()'s output is multi-line ("FOCUS: ...\nPriority: ...\n...")
+    // — only the first line is worth showing in this compact list.
+    const focusLine = (e.focus || "").split("\n")[0];
+    when.textContent = formatLogTimestamp(e.ts) + " — " + focusLine;
+    const reply = document.createElement("div");
+    reply.className = "tdesc";
+    reply.textContent = e.reply.length > 400 ? e.reply.slice(0, 400) + "…" : e.reply;
+    item.appendChild(when);
+    item.appendChild(reply);
+    autonomousLog.appendChild(item);
+  }
+}
+loadAutonomousLog();
+
+autonomousLogRefresh.addEventListener("click", (e) => {
+  e.preventDefault();
+  autonomousLog.textContent = "Loading…";
+  loadAutonomousLog();
+});
+
 async function loadTools() {
   const res = await fetch("/api/tools");
   const data = await res.json();
@@ -705,6 +766,23 @@ def create_app(config: Config) -> Flask:
         state["history"] = []
         clear_history(config.memory_file)
         return jsonify({"ok": True})
+
+    @app.route("/api/autonomous-log")
+    def autonomous_log():
+        # Written by talaria.autonomous, a separate process — read fresh
+        # from disk on every request rather than cached, since it changes
+        # outside this server's own request/response cycle.
+        path = os.path.join(config.workspace_dir, ".autonomous_log.json")
+        entries = []
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    entries = data
+            except Exception:
+                entries = []
+        return jsonify({"entries": entries})
 
     @app.route("/api/open-workspace", methods=["POST"])
     def open_workspace():

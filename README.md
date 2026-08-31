@@ -245,6 +245,12 @@ share the CLI/web UI's conversation history, so autonomous work never
 pollutes an interactive chat; the goal tree, notes and skill state are
 what carry context from one check-in to the next instead.
 
+The web UI's sidebar has an "Autonomous log" section showing the most
+recent check-ins (newest first) — it's read fresh from
+`.autonomous_log.json` on load, with a refresh (&#8635;) link next to the
+title since the log changes from the separate `talaria.autonomous`
+process, outside the web UI's own request/response cycle.
+
 ### Checkpoints
 
 Before a risky or experimental task, ask the agent to `checkpoint_save`
