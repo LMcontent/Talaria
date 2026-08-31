@@ -193,6 +193,28 @@ actually lets the agent "know" things across restarts, not just within one
 open terminal. `recall` lists saved notes with their index, `forget
 <index>` removes one. Override the file with `NOTES_FILE` in `.env`.
 
+### Goals
+
+For long-running or open-ended work, `goal_add` builds a persistent tree
+of goals and sub-goals (each with a priority and a status) in
+`WORKSPACE_DIR/.goals.json` — so the objective survives across sessions
+instead of needing to be restated every time. `goal_list` shows the tree;
+`goal_update` changes a goal's status/priority or appends a progress note
+(goals aren't deleted on failure — set status to `dropped` and the record
+stays, the same "don't lose the history of what was tried" idea as
+`errbook`/`idea_lab`).
+
+The actually useful part is `goal_focus`: rather than the vague top-level
+objective ("earn money"), it picks the single highest-priority *active*
+goal that has no active sub-goals of its own — drilling past umbrella
+goals into whatever concrete child is actually actionable next — and
+shows the ancestor chain plus recent notes for context. Call it at the
+start of a task with no explicit instruction instead of asking what to do.
+
+This is a goal tracker, not a scheduler — nothing acts on it between
+sessions on its own; a session still has to be opened (CLI or web) and
+`goal_focus` called for anything to happen.
+
 ### Checkpoints
 
 Before a risky or experimental task, ask the agent to `checkpoint_save`
