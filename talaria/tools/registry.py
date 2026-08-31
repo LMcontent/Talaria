@@ -2,6 +2,7 @@ from talaria.config import Config
 from talaria.providers.base import Provider, ToolSpec
 from talaria.skills import load_skills
 from talaria.tools.browser import BROWSER_TOOLS
+from talaria.tools.checkpoint import make_checkpoint_tools
 from talaria.tools.code_exec import make_code_tool, make_install_package_tool
 from talaria.tools.delegate import make_delegate_tool
 from talaria.tools.documents import make_document_tools
@@ -20,6 +21,7 @@ def build_tools(
         make_code_tool(config.workspace_dir, config.confirm_code_exec),
         make_install_package_tool(config.workspace_dir, config.confirm_code_exec),
         *make_memory_tools(config.notes_file),
+        *make_checkpoint_tools(config.workspace_dir),
         *load_skills(config.skills_dir),
     ]
 

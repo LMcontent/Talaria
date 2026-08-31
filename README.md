@@ -185,6 +185,23 @@ actually lets the agent "know" things across restarts, not just within one
 open terminal. `recall` lists saved notes with their index, `forget
 <index>` removes one. Override the file with `NOTES_FILE` in `.env`.
 
+### Checkpoints
+
+Before a risky or experimental task, ask the agent to `checkpoint_save`
+under a name — it snapshots conversation history, notes, workspace files,
+and every skill's own persisted state (errbook, feedback, caches, etc.) as
+they stand right then. If the experiment goes badly, `checkpoint_restore`
+brings all of that back to exactly that point, discarding everything
+written since — so a bad run's wrong answers, mis-learned "lessons" in a
+skill's state, or junk files never make it into the memory you keep using
+afterwards. `checkpoint_list` shows saved checkpoints, `checkpoint_discard`
+deletes one you no longer need.
+
+Restoring only rewrites files on disk — it can't reach into the current
+process's already-loaded conversation, so run `/reset` (or start a new
+session) right after a restore to make the rollback actually take effect
+in what the agent remembers.
+
 ### Streaming and code execution
 
 Responses are streamed to the terminal as they're generated (for both
