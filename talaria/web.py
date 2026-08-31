@@ -160,7 +160,7 @@ INDEX_HTML = r"""<!doctype html>
 <body>
 <div id="sidebar">
   <h1>Talaria</h1>
-  <div class="meta">provider: {{ provider_name }}</div>
+  <div class="meta">provider: {{ provider_name }} &middot; model: {{ model_name }}</div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">Role</div>
     <select id="role-select">
@@ -573,8 +573,15 @@ def create_app(config: Config) -> Flask:
 
     @app.route("/")
     def index():
+        model_name = (
+            config.claude_model if config.provider == "claude" else config.openai_compat_model
+        )
         return render_template_string(
-            INDEX_HTML, provider_name=config.provider, role=state["role"], roles=ROLES
+            INDEX_HTML,
+            provider_name=config.provider,
+            model_name=model_name,
+            role=state["role"],
+            roles=ROLES,
         )
 
     @app.route("/api/chat", methods=["POST"])
