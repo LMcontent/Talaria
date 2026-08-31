@@ -4,32 +4,19 @@
 Gives the agent memory that survives across run_python calls AND sessions:
 anything saved here can be read later by any tool, skill, or code snippet.
 """
-import json
-import os
-
+from talaria.json_store import load_json, save_json
 from talaria.providers.base import ToolSpec
 
-_STATE_DIR = os.path.join(".", "state")
-_STATE_FILE = os.path.join(_STATE_DIR, "store.json")
+_FILE = "store.json"
 
 
 def _load_db():
-    if not os.path.isfile(_STATE_FILE):
-        return {}
-    try:
-        with open(_STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    db = load_json(_FILE)
+    return db if isinstance(db, dict) else {}
 
 
 def _save_db(db):
-    os.makedirs(_STATE_DIR, exist_ok=True)
-    tmp = _STATE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _STATE_FILE)
+    save_json(_FILE, db)
 
 
 def state_set(key: str = "", value: str = "") -> str:

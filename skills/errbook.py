@@ -7,14 +7,12 @@ v2 fixes (learned from live test):
      paraphrase-tolerant in the direction that matters
   3) RU/EN stopword filter added; light stemmer kept (ё->е)
 """
-import json
-import os
 import re
 
+from talaria.json_store import load_json, save_json
 from talaria.providers.base import ToolSpec
 
-_DIR = os.path.join(".", "state")
-_FILE = os.path.join(_DIR, "errbook.json")
+_FILE = "errbook.json"
 
 _SUFFIXES = [
     "иями", "ями", "ами", "иях", "ях", "ов", "ев", "ей", "ой", "ый", "ий",
@@ -55,15 +53,8 @@ def _tokens(text):
 
 def _load():
     """Load and lazily migrate entries to v2 format (tokens = sig + solution)."""
-    entries = []
-    if os.path.isfile(_FILE):
-        try:
-            with open(_FILE, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict):
-                entries = d.get("entries", []) or []
-        except Exception:
-            entries = []
+    raw = load_json(_FILE)
+    entries = raw.get("entries", []) or [] if isinstance(raw, dict) else []
     migrated = False
     for e in entries:
         want = sorted(set(_tokens(e.get("signature", "")) + _tokens(e.get("solution", ""))))
@@ -77,11 +68,7 @@ def _load():
 
 
 def _save(db):
-    os.makedirs(_DIR, exist_ok=True)
-    tmp = _FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _FILE)
+    save_json(_FILE, db)
 
 
 def errbook_add(error_signature: str = "", solution: str = "") -> str:

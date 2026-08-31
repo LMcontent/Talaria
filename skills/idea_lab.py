@@ -1,38 +1,26 @@
 # -*- coding: utf-8 -*-
 """Idea Lab: a visible iteration loop - hypotheses, experiments, pivots.
 
-Backed by ./state/lab.json so the board survives across code runs and sessions.
+Backed by WORKSPACE_DIR/state/lab.json so the board survives across code
+runs and sessions.
 """
-import json
-import os
-
+from talaria.json_store import load_json, save_json
 from talaria.providers.base import ToolSpec
 
-_LAB_DIR = os.path.join(".", "state")
-_LAB_FILE = os.path.join(_LAB_DIR, "lab.json")
+_FILE = "lab.json"
 
 
 def _load():
-    if not os.path.isfile(_LAB_FILE):
+    d = load_json(_FILE)
+    if not isinstance(d, dict):
         return {"hypotheses": [], "experiments": []}
-    try:
-        with open(_LAB_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict):
-            return {"hypotheses": [], "experiments": []}
-        d.setdefault("hypotheses", [])
-        d.setdefault("experiments", [])
-        return d
-    except Exception:
-        return {"hypotheses": [], "experiments": []}
+    d.setdefault("hypotheses", [])
+    d.setdefault("experiments", [])
+    return d
 
 
 def _save(db):
-    os.makedirs(_LAB_DIR, exist_ok=True)
-    tmp = _LAB_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _LAB_FILE)
+    save_json(_FILE, db)
 
 
 def lab_hyp(idea: str = "", expected: str = "") -> str:

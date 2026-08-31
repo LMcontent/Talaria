@@ -403,6 +403,18 @@ currently loaded, built-in and skill-provided alike. A skill file that
 fails to import is skipped with a `[skills] failed to load ...` message
 — it doesn't take down the others.
 
+Skills that persist their own state (`state_store`, `errbook`, `idea_lab`,
+`feedback_loop`, `meaning_cache`, `simple_scheduler`, `shift_log`) do it
+through `talaria/json_store.py`, which saves under `WORKSPACE_DIR/state/`
+— use `load_json`/`save_json` from there in a new skill that needs its
+own persistent file, rather than hand-rolling `open()`/`json.load()`
+again. (Older versions of these skills used a `./state` folder relative
+to wherever the process happened to be launched from, which could
+silently point at the wrong place — e.g. `talaria.autonomous` started
+from a different working directory than the CLI/web UI. All of them now
+resolve the same `WORKSPACE_DIR` `Config.workspace_dir` does, regardless
+of process cwd.)
+
 ### Self-authored skills
 
 The agent can propose a brand-new tool for itself via `propose_skill`

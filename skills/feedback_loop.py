@@ -2,35 +2,23 @@
 """Feedback loop: human ratings per task type - the ONLY external learning
 signal the agent has. Aggregated means make weak spots visible, closing the
 otherwise self-referential improvement loop."""
-import json
-import os
 from datetime import datetime, timezone
 
+from talaria.json_store import load_json, save_json
 from talaria.providers.base import ToolSpec
 
-_DIR = os.path.join(".", "state")
-_FILE = os.path.join(_DIR, "feedback.json")
+_FILE = "feedback.json"
 
 
 def _load():
-    if not os.path.isfile(_FILE):
+    d = load_json(_FILE)
+    if not isinstance(d, dict) or not isinstance(d.get("ratings"), list):
         return {"ratings": []}
-    try:
-        with open(_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict) or not isinstance(d.get("ratings"), list):
-            return {"ratings": []}
-        return d
-    except Exception:
-        return {"ratings": []}
+    return d
 
 
 def _save(db):
-    os.makedirs(_DIR, exist_ok=True)
-    tmp = _FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _FILE)
+    save_json(_FILE, db)
 
 
 def _mean(xs):
