@@ -6,6 +6,7 @@ from talaria.tools.checkpoint import make_checkpoint_tools
 from talaria.tools.code_exec import make_code_tool, make_install_package_tool
 from talaria.tools.delegate import make_delegate_tool
 from talaria.tools.documents import make_document_tools
+from talaria.tools.goals import make_goal_tools
 from talaria.tools.memory_tools import make_memory_tools
 from talaria.tools.web import WEB_TOOLS
 from talaria.usage import UsageTracker
@@ -21,6 +22,7 @@ def build_tools(
         make_code_tool(config.workspace_dir, config.confirm_code_exec),
         make_install_package_tool(config.workspace_dir, config.confirm_code_exec),
         *make_memory_tools(config.notes_file),
+        *make_goal_tools(config.workspace_dir),
         *make_checkpoint_tools(config.workspace_dir),
         *load_skills(config.skills_dir),
     ]
