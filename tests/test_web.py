@@ -274,6 +274,41 @@ def test_usage_endpoint_reports_estimated_cost_when_prices_configured(app_factor
     assert client.get("/api/usage").get_json()["estimated_cost"] == 2.0
 
 
+def test_autonomous_log_returns_empty_list_when_no_log_file(app_factory):
+    client, _, _ = app_factory([])
+    resp = client.get("/api/autonomous-log")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"entries": []}
+
+
+def test_autonomous_log_returns_written_entries(app_factory):
+    client, config, _ = app_factory([])
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    entries = [
+        {"ts": "2026-08-31T10:00:00+00:00", "focus": "FOCUS: #1 A", "reply": "did a thing"},
+        {"ts": "2026-08-31T11:00:00+00:00", "focus": "FOCUS: #2 B", "reply": "did another thing"},
+    ]
+    with open(os.path.join(config.workspace_dir, ".autonomous_log.json"), "w", encoding="utf-8") as f:
+        json.dump(entries, f)
+
+    resp = client.get("/api/autonomous-log")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"entries": entries}
+
+
+def test_autonomous_log_returns_empty_list_for_corrupt_file(app_factory):
+    client, config, _ = app_factory([])
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    with open(os.path.join(config.workspace_dir, ".autonomous_log.json"), "w", encoding="utf-8") as f:
+        f.write("{not valid json")
+
+    resp = client.get("/api/autonomous-log")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"entries": []}
+
+
 def test_open_workspace_creates_dir_and_launches_opener(app_factory, monkeypatch):
     client, config, _ = app_factory([])
     calls = []
