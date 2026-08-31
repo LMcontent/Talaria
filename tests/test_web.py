@@ -79,6 +79,21 @@ def test_index_page_loads(app_factory):
     assert b"Talaria" in resp.data
 
 
+def test_index_page_shows_provider_and_model(app_factory):
+    client, _, _ = app_factory([], provider="openai_compat", openai_compat_model="gpt-5.6-luna")
+    resp = client.get("/")
+    body = resp.get_data(as_text=True)
+    assert "openai_compat" in body
+    assert "gpt-5.6-luna" in body
+
+
+def test_index_page_shows_claude_model_when_that_provider_is_active(app_factory):
+    client, _, _ = app_factory([], provider="claude", claude_model="claude-opus-5")
+    resp = client.get("/")
+    body = resp.get_data(as_text=True)
+    assert "claude-opus-5" in body
+
+
 def test_chat_rejects_empty_message(app_factory):
     client, _, _ = app_factory([])
     resp = client.post("/api/chat", json={"message": "  "})
