@@ -213,7 +213,37 @@ start of a task with no explicit instruction instead of asking what to do.
 
 This is a goal tracker, not a scheduler — nothing acts on it between
 sessions on its own; a session still has to be opened (CLI or web) and
-`goal_focus` called for anything to happen.
+`goal_focus` called for anything to happen — unless you turn on
+Autonomous mode below.
+
+### Autonomous mode
+
+**Off by default.** Set `AUTONOMOUS_MODE=true` in `.env` and run
+`python -m talaria.autonomous` (its own process, separate from the CLI/web
+UI) to have Talaria wake up on its own every `AUTONOMOUS_INTERVAL_MINUTES`
+(default 60), call `goal_focus` to see what's actionable, and work on it
+— this is what actually closes the gap the Goals section above leaves
+open: a goal tree nobody ever checks between sessions doesn't do
+anything by itself. Stop the process (or set `AUTONOMOUS_MODE=false`) to
+turn it back off.
+
+**Unattended runs never get `run_python`, `install_package`,
+`propose_skill`, or `delegate_task`.** All four either execute code with
+your OS-level permissions or would otherwise regain the full tool set
+through a sub-agent — normally each asks for a `y/N` confirmation in the
+terminal, which has no one to answer it when nothing is watching. An
+autonomous check-in can still read/write workspace files and use the
+goal tree, notes, checkpoints, and any skill you already approved through
+`propose_skill` in an earlier, attended session (those went through a
+security review when you approved them — this doesn't re-review them).
+
+Each check-in is logged to `WORKSPACE_DIR/.autonomous_log.json`
+(timestamp, the goal it focused on, its reply) as well as printed to the
+terminal running the process, so you can review what happened while you
+were away. Each check-in is a fresh, short-lived agent — it does not
+share the CLI/web UI's conversation history, so autonomous work never
+pollutes an interactive chat; the goal tree, notes and skill state are
+what carry context from one check-in to the next instead.
 
 ### Checkpoints
 
