@@ -8,6 +8,7 @@ from talaria.tools.delegate import make_delegate_tool
 from talaria.tools.documents import make_document_tools
 from talaria.tools.goals import make_goal_tools
 from talaria.tools.memory_tools import make_memory_tools
+from talaria.tools.procedure import make_procedure_tool
 from talaria.tools.web import WEB_TOOLS
 from talaria.usage import UsageTracker
 
@@ -36,5 +37,10 @@ def build_tools(
     )
     if delegate_tool is not None:
         tools.append(delegate_tool)
+
+    # Built from `tools` as it stands here (everything above, plus
+    # delegate_task if present) — run_procedure's internal loop gets
+    # exactly this agent's own capabilities, nothing more.
+    tools.append(make_procedure_tool(provider, tools, usage=usage))
 
     return tools
