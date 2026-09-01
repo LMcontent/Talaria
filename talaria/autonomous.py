@@ -35,17 +35,20 @@ from talaria.tools.registry import build_tools
 from talaria.usage import UsageTracker
 
 # Tools that normally require an attended y/N confirmation, or that hand
-# out the full unfiltered tool set again (delegate_task's sub-agents) —
+# out the full unfiltered tool set again (delegate_task's sub-agents,
+# run_procedure's internal loop — both are built from this agent's own
+# tool list *before* filtering, so excluding them here is the only way to
+# keep an unattended run from reaching run_python etc. through them) —
 # never available on an unattended run.
-EXCLUDED_TOOLS = {"run_python", "install_package", "propose_skill", "delegate_task"}
+EXCLUDED_TOOLS = {"run_python", "install_package", "propose_skill", "delegate_task", "run_procedure"}
 
 PROMPT_TEMPLATE = (
     "This is an unattended autonomous check-in — nobody is watching, so "
-    "run_python, install_package, propose_skill and delegate_task are not "
-    "available this turn (they need an attended session). Work toward the "
-    "current focus using the tools you do have (documents, web, notes, "
-    "goals, checkpoints, and any already-installed skill). Use goal_update "
-    "to record progress, or change status/priority as you learn things.\n\n"
+    "{excluded} are not available this turn (they need an attended "
+    "session). Work toward the current focus using the tools you do have "
+    "(documents, web, notes, goals, checkpoints, and any already-installed "
+    "skill). Use goal_update to record progress, or change status/priority "
+    "as you learn things.\n\n"
     "{focus}"
 )
 
@@ -95,7 +98,8 @@ def tick(config: Config, provider: Provider, usage: UsageTracker) -> str | None:
 
     print(f"\n[autonomous] check-in at {datetime.now(timezone.utc).isoformat()}")
     print(f"[autonomous] {focus}")
-    reply = agent.run(PROMPT_TEMPLATE.format(focus=focus))
+    prompt = PROMPT_TEMPLATE.format(excluded=", ".join(sorted(EXCLUDED_TOOLS)), focus=focus)
+    reply = agent.run(prompt)
     print()
 
     _append_log(config.workspace_dir, {

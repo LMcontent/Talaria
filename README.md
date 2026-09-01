@@ -228,14 +228,18 @@ anything by itself. Stop the process (or set `AUTONOMOUS_MODE=false`) to
 turn it back off.
 
 **Unattended runs never get `run_python`, `install_package`,
-`propose_skill`, or `delegate_task`.** All four either execute code with
-your OS-level permissions or would otherwise regain the full tool set
-through a sub-agent — normally each asks for a `y/N` confirmation in the
-terminal, which has no one to answer it when nothing is watching. An
-autonomous check-in can still read/write workspace files and use the
-goal tree, notes, checkpoints, and any skill you already approved through
-`propose_skill` in an earlier, attended session (those went through a
-security review when you approved them — this doesn't re-review them).
+`propose_skill`, `delegate_task`, or `run_procedure`.** The first three
+execute code or change what's available with your OS-level permissions
+and normally ask for a `y/N` confirmation in the terminal, which has no
+one to answer it when nothing is watching; the last two are excluded for
+a different reason — both build their internal sub-agent/loop from this
+agent's own full tool list, so without excluding them by name they'd
+silently regain `run_python` and the rest right back through that inner
+loop. An autonomous check-in can still read/write workspace files and use
+the goal tree, notes, checkpoints, and any skill you already approved
+through `propose_skill` in an earlier, attended session (those went
+through a security review when you approved them — this doesn't
+re-review them).
 
 Each check-in is logged to `WORKSPACE_DIR/.autonomous_log.json`
 (timestamp, the goal it focused on, its reply) as well as printed to the
@@ -449,7 +453,44 @@ tools can't be added without you seeing it happen.
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
 - `remember`, `recall`, `forget` — long-term memory across sessions, see above
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
+- `run_procedure` — run a bounded, repetitive tool-calling procedure as a compact state machine instead of a growing conversation, see below
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
+
+### Long, repetitive procedures
+
+`delegate_task` and the normal agent loop both accumulate a conversation
+— every observation, action, and reasoning step gets appended to history
+and resent in full on every turn. Fine for a normal task, but for
+genuinely repetitive procedural work ("fix every failing test", "process
+each row of this file") that history keeps almost nothing worth keeping:
+cumulative tokens grow roughly with the square of the step count, and old
+observations linger in context long after they stopped mattering.
+
+`run_procedure` runs an inner loop, hidden from the outer conversation
+just like `delegate_task`'s sub-agent, but built around an explicit
+JSON **state** instead of a transcript — based on ["SKILL.state: Scalable
+Long-Horizon Agent Skills"](https://arxiv.org/html/2608.26263v2) (Badhe et
+al., 2026). Each step the model sees only the procedure's instructions,
+the *current* state, and the latest observation — never prior steps — and
+returns a JSON state patch plus the next tool call (or `finish` with a
+summary). The patch is merged into state (a key set to `null` deletes it)
+and the reasoning that produced it is discarded immediately, so prompt
+size stays roughly flat across the whole procedure instead of growing
+with every step, at the cost of the model only ever seeing what it chose
+to write into state — nothing is recoverable from "history" because there
+isn't any.
+
+This is a poor fit for open-ended or one-off work, and the agent is told
+as much in the tool description — reach for it only when a task is
+genuinely long and repetitive with a state that's actually capturable in
+a handful of fields. Malformed responses (a real risk on weaker/local
+models — the paper reports most small-model failures are exactly this,
+not reasoning errors) get one retry with the parse error fed back as the
+next observation, up to 3 consecutive failures before giving up.
+Excluded from Autonomous mode's tool list for the same reason as
+`delegate_task`: its internal loop is built from this agent's own full
+tool list, so it would otherwise silently regain `run_python` and the
+other unattended-excluded tools through it.
 
 ### Development / making it your own
 
