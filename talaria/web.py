@@ -150,10 +150,6 @@ INDEX_HTML = r"""<!doctype html>
   #sidebar-resizer:hover, #sidebar-resizer.dragging { background: #2b6cb0; }
 
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; height: 100vh; }
-  #warning {
-    font-size: 15px; color: #8a5a00; background: #fff6e0; padding: 6px 16px;
-    border-bottom: 1px solid #eedca0; flex-shrink: 0;
-  }
   #messages { flex: 1; overflow-y: auto; min-height: 0; }
   #messages-inner {
     max-width: 760px; margin: 0 auto; padding: 24px 20px 12px;
@@ -273,7 +269,7 @@ INDEX_HTML = r"""<!doctype html>
     <div class="sidebar-section-title">Settings</div>
     <div class="setting-row">
       <span id="mode-label">Safe mode</span>
-      <label class="switch">
+      <label class="switch" title="Confirmations for run_python / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.">
         <input type="checkbox" id="mode-toggle">
         <span class="switch-slider"></span>
       </label>
@@ -302,9 +298,6 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 <div id="sidebar-resizer"></div>
 <div id="main">
-  <div id="warning">
-    Confirmations for run_python / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.
-  </div>
   <div id="messages"><div id="messages-inner"></div></div>
   <form id="composer">
     <textarea id="input" placeholder="Type a message… (Shift+Enter for a new line)" rows="1"></textarea>
