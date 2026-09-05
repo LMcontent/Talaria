@@ -1,6 +1,6 @@
 # Talaria
 
-<img src="assets/logo.svg" alt="Talaria logo" width="120">
+<img src="assets/logo.png" alt="Talaria logo" width="120">
 
 A small agent for the internet, documents, code and sub-agents, with a
 swappable LLM backend: **Claude API** or any **OpenAI-compatible router**
