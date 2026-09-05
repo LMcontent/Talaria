@@ -1,5 +1,7 @@
 # Talaria
 
+<img src="assets/logo.svg" alt="Talaria logo — a winged sandal" width="120">
+
 A small agent for the internet, documents, code and sub-agents, with a
 swappable LLM backend: **Claude API** or any **OpenAI-compatible router**
 (OrcaRouter, OpenRouter, etc. — e.g. a free model like `qwen/qwen3.8-27b-free`).
