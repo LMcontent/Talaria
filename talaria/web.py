@@ -168,6 +168,22 @@ INDEX_HTML = r"""<!doctype html>
   .msg.assistant { align-self: stretch; }
   .msg.error { align-self: stretch; color: #a4231d; }
   .msg.pending { align-self: stretch; color: #888; font-style: italic; }
+  .msg.working {
+    align-self: stretch; display: flex; align-items: center; gap: 8px;
+    color: #888; font-size: 17px;
+  }
+  .working-dots { display: inline-flex; gap: 3px; }
+  .working-dots span {
+    width: 6px; height: 6px; border-radius: 50%; background: #999;
+    animation: working-bounce 1.1s infinite ease-in-out;
+  }
+  .working-dots span:nth-child(2) { animation-delay: 0.15s; }
+  .working-dots span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes working-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+  }
+  .working-timer { font-variant-numeric: tabular-nums; }
 
   .msg code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -514,6 +530,16 @@ function addMessage(text, cls, renderMd, forceScroll) {
 
 let generating = false;
 let stopRequested = false;
+let genStartTime = 0;
+let genTimerInterval = null;
+let workingDiv = null;
+
+function formatElapsed(seconds) {
+  if (seconds < 60) return seconds + "s";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -539,8 +565,18 @@ form.addEventListener("submit", async (e) => {
   input.disabled = true;
   generating = true;
   stopRequested = false;
-  sendBtn.textContent = "Stop";
   sendBtn.classList.add("stop");
+
+  genStartTime = Date.now();
+  sendBtn.textContent = "Stop · 0s";
+  genTimerInterval = setInterval(() => {
+    sendBtn.textContent = "Stop · " + formatElapsed(Math.floor((Date.now() - genStartTime) / 1000));
+  }, 500);
+
+  workingDiv = addMessage("", "working", false, true);
+  workingDiv.innerHTML =
+    '<span class="working-dots"><span></span><span></span><span></span></span>' +
+    '<span class="working-timer">Thinking…</span>';
 
   let replyDiv = null;
   let fullText = "";
@@ -568,7 +604,10 @@ form.addEventListener("submit", async (e) => {
       // reply is still being generated, instead of getting yanked back
       // down on every chunk.
       const wasNearBottom = isNearBottom();
-      if (!replyDiv) replyDiv = addMessage("", "assistant", true, false);
+      if (!replyDiv) {
+        if (workingDiv) { workingDiv.remove(); workingDiv = null; }
+        replyDiv = addMessage("", "assistant", true, false);
+      }
       fullText += chunkText;
       replyDiv.innerHTML = renderMarkdown(fullText);
       if (wasNearBottom) {
@@ -583,6 +622,8 @@ form.addEventListener("submit", async (e) => {
   } catch (err) {
     addMessage("Network error: " + err, "error");
   } finally {
+    clearInterval(genTimerInterval);
+    if (workingDiv) { workingDiv.remove(); workingDiv = null; }
     input.disabled = false;
     generating = false;
     sendBtn.textContent = "Send";
