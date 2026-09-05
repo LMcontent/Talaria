@@ -3,20 +3,17 @@ import sys
 from talaria.agent import Agent
 from talaria.compaction import compact_history
 from talaria.config import load_config
+from talaria.cron_scheduler import start_cron_scheduler
 from talaria.memory import clear_history, load_history, save_history
-from talaria.notes import format_notes_for_prompt, load_notes
 from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.sandbox import list_packages, sandbox_dir
+from talaria.system_prompt import build_system
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
 from talaria.usage import UsageTracker
 
-
-def build_system(role: str, notes_file: str) -> str:
-    base = ROLES[role]["system"]
-    notes_block = format_notes_for_prompt(load_notes(notes_file))
-    return f"{base}\n\n{notes_block}" if notes_block else base
+__all__ = ["build_system", "main"]
 
 
 def main() -> None:
@@ -43,6 +40,10 @@ def main() -> None:
     # approves, so it's added after construction rather than via build_tools
     # — and only on the top-level agent, never on delegate_task sub-agents.
     agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent, usage=usage)])
+    # Runs jobs scheduled via cron_add for as long as this process stays up
+    # — see talaria/cron_scheduler.py for why that's an acceptable
+    # limitation at this stage.
+    start_cron_scheduler(config, provider, usage)
 
     print(
         f"Talaria ready (provider={config.provider}, role={current_role}). "

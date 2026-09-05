@@ -277,6 +277,31 @@ recent check-ins (newest first) — it's read fresh from
 title since the log changes from the separate `talaria.autonomous`
 process, outside the web UI's own request/response cycle.
 
+### Cron jobs
+
+**On by default, no setup needed.** The agent can schedule a prompt to
+run automatically with `cron_add(schedule, prompt, name=)`, using a
+standard 5-field cron expression in UTC (minute hour day-of-month month
+day-of-week — e.g. `0 9 * * 1-5` for 9am UTC on weekdays, `*/30 * * * *`
+for every 30 minutes). Just ask the agent to schedule something in plain
+language ("every morning at 9am UTC, check the news and summarize it")
+and it'll call `cron_add` itself. `cron_list`, `cron_remove` and
+`cron_toggle` manage jobs from there.
+
+**Jobs only fire while a Talaria process (the web UI or the CLI) is
+running** — there's no OS-level cron/systemd entry yet, so a job scheduled
+for 9am does nothing if nothing is up at 9am. Good enough to start with;
+worth revisiting if that turns out to matter. Whichever process is up
+checks once every 30 seconds for jobs that are due.
+
+Same restrictions as autonomous mode, and for the same reason: a cron
+firing is unattended, so it never gets `run_python`, `install_package`,
+`propose_skill`, `delegate_task`, or `run_procedure`. Each firing is a
+fresh, short-lived agent call (not the web UI/CLI's own conversation) and
+is logged to `WORKSPACE_DIR/.cron_log.json`, printed to the terminal, and
+shown in the web UI sidebar's "Cron jobs" section alongside each job's
+schedule and last-run time.
+
 ### Checkpoints
 
 Before a risky or experimental task, ask the agent to `checkpoint_save`
