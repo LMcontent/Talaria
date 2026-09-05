@@ -541,6 +541,41 @@ function formatElapsed(seconds) {
   return m + ":" + String(s).padStart(2, "0");
 }
 
+// Shared by an actual send and by noticing on page load that a reply kicked
+// off before a reload is still running server-side (see checkOngoingGeneration)
+// — both cases show the same "Thinking…" bubble + live timer and lock the
+// composer the same way.
+function startWorkingIndicator() {
+  input.disabled = true;
+  generating = true;
+  sendBtn.classList.add("stop");
+  sendBtn.textContent = "Stop";
+
+  genStartTime = Date.now();
+  workingDiv = addMessage("", "working", false, true);
+  workingDiv.innerHTML =
+    '<span class="working-dots"><span></span><span></span><span></span></span>' +
+    '<span class="working-timer">Thinking… 0s</span>';
+  genTimerInterval = setInterval(() => {
+    const timerEl = workingDiv ? workingDiv.querySelector(".working-timer") : null;
+    if (!timerEl) {
+      clearInterval(genTimerInterval);
+      return;
+    }
+    const elapsed = Math.floor((Date.now() - genStartTime) / 1000);
+    timerEl.textContent = "Thinking… " + formatElapsed(elapsed);
+  }, 500);
+}
+
+function stopWorkingIndicator() {
+  clearInterval(genTimerInterval);
+  if (workingDiv) { workingDiv.remove(); workingDiv = null; }
+  input.disabled = false;
+  generating = false;
+  sendBtn.textContent = "Send";
+  sendBtn.classList.remove("stop");
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -562,21 +597,8 @@ form.addEventListener("submit", async (e) => {
   addMessage(text, "user");
   input.value = "";
   autoGrowInput();
-  input.disabled = true;
-  generating = true;
   stopRequested = false;
-  sendBtn.classList.add("stop");
-
-  genStartTime = Date.now();
-  sendBtn.textContent = "Stop · 0s";
-  genTimerInterval = setInterval(() => {
-    sendBtn.textContent = "Stop · " + formatElapsed(Math.floor((Date.now() - genStartTime) / 1000));
-  }, 500);
-
-  workingDiv = addMessage("", "working", false, true);
-  workingDiv.innerHTML =
-    '<span class="working-dots"><span></span><span></span><span></span></span>' +
-    '<span class="working-timer">Thinking…</span>';
+  startWorkingIndicator();
 
   let replyDiv = null;
   let fullText = "";
@@ -622,12 +644,7 @@ form.addEventListener("submit", async (e) => {
   } catch (err) {
     addMessage("Network error: " + err, "error");
   } finally {
-    clearInterval(genTimerInterval);
-    if (workingDiv) { workingDiv.remove(); workingDiv = null; }
-    input.disabled = false;
-    generating = false;
-    sendBtn.textContent = "Send";
-    sendBtn.classList.remove("stop");
+    stopWorkingIndicator();
     input.focus();
     loadUsage();
   }
@@ -636,6 +653,9 @@ form.addEventListener("submit", async (e) => {
 async function loadHistory() {
   const res = await fetch("/api/history");
   const data = await res.json();
+  // Idempotent (clears first) — also reused once a resumed generation
+  // finishes, to pull in the reply that arrived while this page was gone.
+  messagesEl.innerHTML = "";
   for (const turn of data.turns) {
     if (turn.role === "user") {
       addMessage(turn.text, "user", false, false);
@@ -645,7 +665,45 @@ async function loadHistory() {
   }
   scrollEl.scrollTop = scrollEl.scrollHeight;
 }
-loadHistory();
+
+// A reply kicked off before a reload (or from another tab) keeps running
+// server-side regardless — this notices that on load and shows the same
+// working indicator a live send would, instead of the page just looking
+// idle while the model is still actually working.
+async function checkOngoingGeneration() {
+  let res;
+  try {
+    res = await fetch("/api/generating");
+  } catch (err) {
+    return;
+  }
+  const data = await res.json();
+  if (!data.generating) return;
+
+  stopRequested = false;
+  startWorkingIndicator();
+
+  const poll = setInterval(async () => {
+    let r;
+    try {
+      r = await fetch("/api/generating");
+    } catch (err) {
+      return;
+    }
+    const d = await r.json();
+    if (!d.generating) {
+      clearInterval(poll);
+      stopWorkingIndicator();
+      await loadHistory();
+      loadUsage();
+    }
+  }, 1000);
+}
+
+(async () => {
+  await loadHistory();
+  await checkOngoingGeneration();
+})();
 
 async function loadUsage() {
   const res = await fetch("/api/usage");
@@ -881,6 +939,12 @@ def create_app(config: Config) -> Flask:
         cancel_event = threading.Event()
         state["cancel_event"] = cancel_event
 
+        # Runs to completion (and always saves/rolls back history) regardless
+        # of whether anything is still reading `q` afterwards — the browser
+        # tab can be closed or reloaded mid-stream, but the model call it
+        # kicked off keeps running server-side either way, so finishing it
+        # cleanly can't depend on a client still being attached to consume
+        # the stream.
         def worker():
             print(f"\n[web] you> {user_input}")
             print("[web] talaria> ", end="", flush=True)
@@ -893,9 +957,14 @@ def create_app(config: Config) -> Flask:
                         cancel_event=cancel_event,
                     )
                 print()
+                state["history"] = compact_history(history, config.max_history_turns)
+                save_history(config.memory_file, state["history"])
+                state["cancel_event"] = None
                 q.put(("done", ""))
             except Exception as e:
                 print(f"\n[web] error: {e}")
+                del history[history_len_before:]
+                state["cancel_event"] = None
                 q.put(("error", str(e)))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -909,17 +978,9 @@ def create_app(config: Config) -> Flask:
         first_kind, first_payload = q.get()
 
         if first_kind == "error":
-            del history[history_len_before:]
-            state["cancel_event"] = None
             return jsonify({"error": first_payload}), 500
 
-        def finalize():
-            state["history"] = compact_history(history, config.max_history_turns)
-            save_history(config.memory_file, state["history"])
-            state["cancel_event"] = None
-
         if first_kind == "done":
-            finalize()
             return Response("", mimetype="text/plain")
 
         def generate():
@@ -928,12 +989,7 @@ def create_app(config: Config) -> Flask:
                 kind, payload = q.get()
                 if kind == "chunk":
                     yield payload
-                elif kind == "error":
-                    del history[history_len_before:]
-                    state["cancel_event"] = None
-                    return
-                elif kind == "done":
-                    finalize()
+                elif kind in ("error", "done"):
                     return
 
         return Response(generate(), mimetype="text/plain")
@@ -945,6 +1001,14 @@ def create_app(config: Config) -> Flask:
             return jsonify({"ok": False, "error": "nothing is generating"}), 409
         cancel_event.set()
         return jsonify({"ok": True})
+
+    @app.route("/api/generating")
+    def generating_endpoint():
+        # A reply kicked off from /api/chat/stream keeps running server-side
+        # (in its worker thread) even if the page that started it is closed
+        # or reloaded — this lets a freshly loaded page notice that and show
+        # a working indicator instead of looking like nothing is happening.
+        return jsonify({"generating": state.get("cancel_event") is not None})
 
     @app.route("/api/history")
     def history_endpoint():
