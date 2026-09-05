@@ -41,3 +41,25 @@ def test_run_python_cannot_import_talarias_own_packages(sandbox_workspace):
     # is that the agent's installs stay isolated from Talaria's own.
     result = run_python(sandbox_workspace, "import flask", require_confirmation=False)
     assert "ModuleNotFoundError" in result or "[exit code" in result
+
+
+def test_run_python_resolves_a_callable_confirmation_on_every_call(sandbox_workspace, monkeypatch):
+    # require_confirmation can be a live callable (the web UI's Safe/Extreme
+    # toggle) rather than a fixed bool, so flipping it must take effect on
+    # the very next call with no rebuild involved.
+    safe = {"on": True}
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    declined = run_python(sandbox_workspace, "print(1)", require_confirmation=lambda: safe["on"])
+    assert "declined" in declined
+
+    safe["on"] = False
+    result = run_python(sandbox_workspace, "print(1)", require_confirmation=lambda: safe["on"])
+    assert result.strip() == "1"
+
+
+def test_install_package_resolves_a_callable_confirmation(tmp_path, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    result = install_package(str(tmp_path / "ws"), "requests", require_confirmation=lambda: True)
+    assert "declined" in result
+    assert not (tmp_path / "ws" / ".sandbox").exists()

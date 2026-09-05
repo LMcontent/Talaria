@@ -110,6 +110,24 @@ INDEX_HTML = r"""<!doctype html>
     background: #fff; cursor: pointer; font-size: 19.5px;
   }
   #open-workspace-btn { margin-top: 8px; }
+
+  .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #mode-label { font-size: 19.5px; font-weight: 600; }
+  #mode-label.danger { color: #a4231d; }
+  .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch-slider {
+    position: absolute; inset: 0; background: #ccc; border-radius: 22px;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .switch-slider::before {
+    content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform 0.15s;
+  }
+  .switch input:checked + .switch-slider { background: #a4231d; }
+  .switch input:checked + .switch-slider::before { transform: translateX(18px); }
+  #mode-desc { margin-top: 6px; font-size: 16.5px; line-height: 1.4; color: #777; }
+
   .tool-item, .log-item { padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 18px; }
   .tool-item:last-child, .log-item:last-child { border-bottom: none; }
   .tool-item .tname, .log-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
@@ -201,6 +219,8 @@ INDEX_HTML = r"""<!doctype html>
     #role-select, #reset-btn, #open-workspace-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
     .tool-item, .log-item { border-color: #2c2d31; }
     .tool-item .tdesc, .log-item .tdesc { color: #999; }
+    #mode-desc { color: #999; }
+    .switch-slider { background: #444; }
     .log-item .tname { color: #999; }
     .sidebar-section-title a:hover { color: #5a9fd4; }
     #usage-box { color: #aaa; }
@@ -232,6 +252,17 @@ INDEX_HTML = r"""<!doctype html>
       <option value="{{ name }}" {% if name == role %}selected{% endif %}>{{ name }}</option>
       {% endfor %}
     </select>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Settings</div>
+    <div class="setting-row">
+      <span id="mode-label">Safe mode</span>
+      <label class="switch">
+        <input type="checkbox" id="mode-toggle">
+        <span class="switch-slider"></span>
+      </label>
+    </div>
+    <div id="mode-desc" class="tdesc">run_python / install_package ask for confirmation in the terminal.</div>
   </div>
   <div class="sidebar-section">
     <button id="reset-btn" type="button">Reset history</button>
@@ -279,6 +310,9 @@ const autonomousLog = document.getElementById("autonomous-log");
 const autonomousLogRefresh = document.getElementById("autonomous-log-refresh");
 const sidebar = document.getElementById("sidebar");
 const sidebarResizer = document.getElementById("sidebar-resizer");
+const modeToggle = document.getElementById("mode-toggle");
+const modeLabel = document.getElementById("mode-label");
+const modeDesc = document.getElementById("mode-desc");
 
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -631,6 +665,43 @@ autonomousLogRefresh.addEventListener("click", (e) => {
   loadAutonomousLog();
 });
 
+function applyMode(safe) {
+  modeToggle.checked = !safe;
+  modeLabel.textContent = safe ? "Safe mode" : "Extreme mode";
+  modeLabel.classList.toggle("danger", !safe);
+  modeDesc.textContent = safe
+    ? "run_python / install_package ask for confirmation in the terminal."
+    : "run_python / install_package execute immediately — no confirmation prompt.";
+}
+
+async function loadSettings() {
+  const res = await fetch("/api/settings");
+  const data = await res.json();
+  applyMode(data.safe_mode);
+}
+loadSettings();
+
+modeToggle.addEventListener("change", async () => {
+  const wantSafe = !modeToggle.checked;
+  if (!wantSafe) {
+    const ok = confirm(
+      "Extreme mode runs model-generated code with NO confirmation prompt, " +
+      "with your OS-level permissions. Are you sure?"
+    );
+    if (!ok) {
+      modeToggle.checked = true;
+      return;
+    }
+  }
+  const res = await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ safe_mode: wantSafe }),
+  });
+  const data = await res.json();
+  applyMode(data.safe_mode);
+});
+
 async function loadTools() {
   const res = await fetch("/api/tools");
   const data = await res.json();
@@ -695,12 +766,18 @@ def create_app(config: Config) -> Flask:
         input_price_per_m=config.token_price_input_per_m,
         output_price_per_m=config.token_price_output_per_m,
     )
-    tools = build_tools(config, provider, usage=usage)
     state = {
         "role": config.default_role if config.default_role in ROLES else DEFAULT_ROLE,
         "history": compact_history(load_history(config.memory_file), config.max_history_turns),
         "cancel_event": None,
+        # Safe mode (default, from .env) asks for a y/N confirmation in the
+        # terminal before run_python/install_package execute. Extreme mode
+        # skips that prompt entirely. A callable (not the bool itself) is
+        # handed to build_tools so flipping this via the sidebar toggle
+        # takes effect on the next tool call, with no rebuild/restart.
+        "safe_mode": config.confirm_code_exec,
     }
+    tools = build_tools(config, provider, usage=usage, confirm_code_exec=lambda: state["safe_mode"])
     agent = Agent(
         provider, tools, system=build_system(state["role"], config.notes_file),
         max_turns=config.max_turns, usage=usage,
@@ -908,6 +985,14 @@ def create_app(config: Config) -> Flask:
         return jsonify(
             {"current": state["role"], "roles": {k: v["description"] for k, v in ROLES.items()}}
         )
+
+    @app.route("/api/settings", methods=["GET", "POST"])
+    def settings_endpoint():
+        if request.method == "POST":
+            data = request.get_json(force=True) or {}
+            if "safe_mode" in data:
+                state["safe_mode"] = bool(data["safe_mode"])
+        return jsonify({"safe_mode": state["safe_mode"]})
 
     @app.route("/api/tools")
     def tools_endpoint():

@@ -206,6 +206,51 @@ def test_role_post_rejects_unknown_role(app_factory):
     assert resp.status_code == 400
 
 
+def test_settings_get_and_post(app_factory):
+    client, _, _ = app_factory([])
+
+    current = client.get("/api/settings").get_json()
+    assert current["safe_mode"] is False  # make_config's confirm_code_exec=False
+
+    switched = client.post("/api/settings", json={"safe_mode": True})
+    assert switched.get_json()["safe_mode"] is True
+    assert client.get("/api/settings").get_json()["safe_mode"] is True
+
+
+def test_settings_toggle_controls_run_python_confirmation_prompt(app_factory, monkeypatch):
+    from talaria.providers.base import ToolCall
+
+    prompted = []
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt="": (prompted.append(True), "y")[1],
+    )
+
+    def run_python_call():
+        return ProviderResponse(
+            text="", tool_calls=[ToolCall(id="1", name="run_python", input={"code": "print(1)"})]
+        )
+
+    client, _, _ = app_factory(
+        [
+            run_python_call(),
+            ProviderResponse(text="done", tool_calls=[]),
+            run_python_call(),
+            ProviderResponse(text="done again", tool_calls=[]),
+        ]
+    )
+
+    # config starts with confirm_code_exec=False (extreme) — no prompt.
+    client.post("/api/chat", json={"message": "run some code"})
+    assert prompted == []
+
+    # Flip to safe mode via the sidebar toggle's endpoint — the *next*
+    # run_python call must now prompt, with no app rebuild in between.
+    client.post("/api/settings", json={"safe_mode": True})
+    client.post("/api/chat", json={"message": "run some code again"})
+    assert prompted == [True]
+
+
 def test_tools_endpoint_lists_builtin_tools(app_factory):
     client, _, _ = app_factory([])
     names = [t["name"] for t in client.get("/api/tools").get_json()["tools"]]

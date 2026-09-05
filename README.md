@@ -304,6 +304,15 @@ running any code the model generated — the code runs with your OS-level
 permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
 in `.env` to skip the prompt (only if you fully trust the model/provider).
 
+In the web UI, the sidebar's **Settings → Safe mode** toggle overrides
+`CONFIRM_CODE_EXEC` live for the running session — flip it to Extreme mode
+to have `run_python`/`install_package` execute immediately with no
+confirmation prompt, or back to Safe mode to restore the prompt. It asks
+for a confirmation of its own before switching to Extreme mode, and takes
+effect on the very next tool call with no restart needed. The prompt
+itself still only ever appears in the terminal running the server, never
+in the browser.
+
 ### Reasoning depth and turn limits
 
 Genuinely multi-step or creative tasks (several tool calls, install a

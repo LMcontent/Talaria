@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+from typing import Callable, Union
 
 from talaria.providers.base import ToolSpec
 from talaria.sandbox import ensure_sandbox
@@ -9,8 +10,18 @@ _TIMEOUT = 15
 _INSTALL_TIMEOUT = 300
 _MAX_CHARS = 4000
 
+# Either a fixed bool (CLI/autonomous — set once at startup from .env) or a
+# zero-arg callable resolved on every call (the web UI's Safe/Extreme mode
+# toggle — reading a bool wouldn't see a change made after the tool was
+# built, since Python closures capture the value, not a live reference).
+Confirmation = Union[bool, Callable[[], bool]]
 
-def run_python(workspace_dir: str, code: str, require_confirmation: bool = True) -> str:
+
+def _wants_confirmation(require_confirmation: Confirmation) -> bool:
+    return require_confirmation() if callable(require_confirmation) else require_confirmation
+
+
+def run_python(workspace_dir: str, code: str, require_confirmation: Confirmation = True) -> str:
     """Run a Python snippet in the sandbox venv (talaria/sandbox.py) and
     return its stdout/stderr.
 
@@ -21,7 +32,7 @@ def run_python(workspace_dir: str, code: str, require_confirmation: bool = True)
     itself (full filesystem/network access), so only use this with a
     trusted model/provider and be mindful of what you approve.
     """
-    if require_confirmation:
+    if _wants_confirmation(require_confirmation):
         print("\n--- The model wants to run this Python code (in its sandbox venv): ---")
         print(code)
         print("--- end of code ---")
@@ -65,7 +76,7 @@ def run_python(workspace_dir: str, code: str, require_confirmation: bool = True)
     return output or "(no output)"
 
 
-def install_package(workspace_dir: str, package: str, require_confirmation: bool = True) -> str:
+def install_package(workspace_dir: str, package: str, require_confirmation: Confirmation = True) -> str:
     """Install a pip package into the sandbox venv so run_python can import
     it afterwards. Never touches Talaria's own environment — an install
     that goes wrong is contained to the sandbox, which can just be deleted.
@@ -74,7 +85,7 @@ def install_package(workspace_dir: str, package: str, require_confirmation: bool
     if not package:
         return "Error: package must be a non-empty pip requirement, e.g. 'requests' or 'pandas==2.2.0'."
 
-    if require_confirmation:
+    if _wants_confirmation(require_confirmation):
         print(f"\n--- The model wants to install into its sandbox venv: {package} ---")
         answer = input("Allow installation? [y/N]: ").strip().lower()
         if answer not in ("y", "yes", "д", "да"):
@@ -107,7 +118,7 @@ def install_package(workspace_dir: str, package: str, require_confirmation: bool
     return f"Installed {package!r} into the sandbox.\n{output}"
 
 
-def make_code_tool(workspace_dir: str, require_confirmation: bool = True) -> ToolSpec:
+def make_code_tool(workspace_dir: str, require_confirmation: Confirmation = True) -> ToolSpec:
     os.makedirs(workspace_dir, exist_ok=True)
     return ToolSpec(
         name="run_python",
@@ -128,7 +139,7 @@ def make_code_tool(workspace_dir: str, require_confirmation: bool = True) -> Too
     )
 
 
-def make_install_package_tool(workspace_dir: str, require_confirmation: bool = True) -> ToolSpec:
+def make_install_package_tool(workspace_dir: str, require_confirmation: Confirmation = True) -> ToolSpec:
     os.makedirs(workspace_dir, exist_ok=True)
     return ToolSpec(
         name="install_package",
