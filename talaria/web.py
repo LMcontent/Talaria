@@ -40,6 +40,21 @@ _MEDIA_EXTENSIONS = {
     ".mp4", ".webm", ".ogg", ".mov",
 }
 
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+
+
+def _load_logo_svg() -> str:
+    # Read fresh from disk rather than baking it into this module, so
+    # replacing assets/logo.svg (as happened twice already) doesn't also
+    # require touching this file. Empty string (renders nothing) if it's
+    # ever missing, rather than a broken-image icon or a hard failure.
+    try:
+        with open(os.path.join(_ASSETS_DIR, "logo.svg"), "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
 WEB_MEDIA_HINT = (
     "\n\nThis is the web chat UI, which renders Markdown images and "
     "videos inline. When you create or already have an image/video file "
@@ -67,6 +82,12 @@ INDEX_HTML = r"""<!doctype html>
     width: 300px; flex-shrink: 0; height: 100vh; overflow-y: auto;
     border-right: 1px solid #ddd; background: #fafafa; padding: 16px;
   }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand-logo { display: flex; flex-shrink: 0; }
+  /* Sized to the cap-height of the "T" next to it (h1 is 24px), not the
+     full line box — an icon at font-size would look oversized next to
+     text this size. */
+  .brand-logo svg { display: block; height: 17px; width: auto; }
   #sidebar h1 { font-size: 24px; margin: 0 0 2px; }
   #sidebar .meta { font-size: 18px; color: #666; margin-bottom: 18px; }
   .sidebar-section { margin-bottom: 18px; }
@@ -193,7 +214,10 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
 <div id="sidebar">
-  <h1>Talaria</h1>
+  <div class="brand">
+    <span class="brand-logo">{{ logo_svg|safe }}</span>
+    <h1>Talaria</h1>
+  </div>
   <div class="meta">provider: {{ provider_name }} &middot; model: {{ model_name }}</div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">Role</div>
@@ -689,6 +713,7 @@ def create_app(config: Config) -> Flask:
             model_name=model_name,
             role=state["role"],
             roles=ROLES,
+            logo_svg=_load_logo_svg(),
         )
 
     @app.route("/api/chat", methods=["POST"])
