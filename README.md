@@ -151,6 +151,26 @@ back down mid-generation. Chat text is sized a bit larger than the
 sidebar's default for comfortable reading; the sidebar itself runs
 noticeably larger still, since it's mostly short labels.
 
+**Images and video render inline** — standard Markdown image syntax,
+`![description](filename.png)`, shows the actual picture (or a `<video
+controls>` player, by extension: mp4/webm/ogg/mov) in the chat instead of
+just the raw text. Relative paths resolve against `WORKSPACE_DIR` — drop
+a file in there (or have the agent produce one via `run_python`/
+`write_document`) and reference it by filename; an `http(s)://` or
+`data:` URL is used as-is. This is the point of "Open workspace folder"
+above and inline images together: put a picture in, ask the agent to
+look at/describe/iterate on it, see its output rendered right there, no
+separate viewer needed. The system prompt tells the model about this
+syntax specifically for the web UI (the CLI has no way to render an
+image, so it isn't told to bother).
+
+The file is served by a dedicated `/workspace-file/<path>` route, not a
+general static-file handler — restricted to an image/video extension
+allowlist and sandboxed to `WORKSPACE_DIR` (same path-escape check as
+`read_document`/`write_document`), so a crafted `![...]()` tag can't be
+used to read arbitrary files, including the `.json` state files
+(history, goals, notes, ...) that also live under `WORKSPACE_DIR`.
+
 The message box grows as you type (up to a max height, then scrolls) so a
 long or pasted message stays fully visible instead of scrolling inside a
 single fixed-height line. Enter sends the message; Shift+Enter inserts a

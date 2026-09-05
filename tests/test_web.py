@@ -309,6 +309,61 @@ def test_autonomous_log_returns_empty_list_for_corrupt_file(app_factory):
     assert resp.get_json() == {"entries": []}
 
 
+def test_workspace_file_serves_an_allowed_image(app_factory):
+    client, config, _ = app_factory([])
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    with open(os.path.join(config.workspace_dir, "chart.png"), "wb") as f:
+        f.write(b"not-really-a-png-but-bytes-are-bytes")
+
+    resp = client.get("/workspace-file/chart.png")
+
+    assert resp.status_code == 200
+    assert resp.data == b"not-really-a-png-but-bytes-are-bytes"
+    assert resp.mimetype == "image/png"
+
+
+def test_workspace_file_serves_from_a_subdirectory(app_factory):
+    client, config, _ = app_factory([])
+    os.makedirs(os.path.join(config.workspace_dir, "renders"), exist_ok=True)
+    with open(os.path.join(config.workspace_dir, "renders", "clip.mp4"), "wb") as f:
+        f.write(b"fake video bytes")
+
+    resp = client.get("/workspace-file/renders/clip.mp4")
+
+    assert resp.status_code == 200
+    assert resp.data == b"fake video bytes"
+
+
+def test_workspace_file_rejects_disallowed_extension(app_factory):
+    client, config, _ = app_factory([])
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    with open(os.path.join(config.workspace_dir, ".env"), "w", encoding="utf-8") as f:
+        f.write("SECRET=1")
+
+    resp = client.get("/workspace-file/.env")
+
+    assert resp.status_code == 403
+
+
+def test_workspace_file_404_for_missing_file(app_factory):
+    client, _, _ = app_factory([])
+    resp = client.get("/workspace-file/nope.png")
+    assert resp.status_code == 404
+
+
+def test_workspace_file_blocks_path_traversal(app_factory):
+    client, config, _ = app_factory([])
+    # A sibling file outside the workspace dir that a traversal attempt
+    # would otherwise be able to reach.
+    outside = os.path.join(os.path.dirname(config.workspace_dir), "secret.png")
+    with open(outside, "wb") as f:
+        f.write(b"outside workspace")
+
+    resp = client.get("/workspace-file/../secret.png")
+
+    assert resp.status_code in (403, 404)
+
+
 def test_open_workspace_creates_dir_and_launches_opener(app_factory, monkeypatch):
     client, config, _ = app_factory([])
     calls = []
