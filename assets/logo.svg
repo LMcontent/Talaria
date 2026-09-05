@@ -1,13 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
-<rect width="240" height="240" fill="#17181c"/>
-<g transform="translate(28,-40) scale(1.05)">
-<g transform="translate(138,168) rotate(-10)"><path d="M -51.0 0 C -51.0 -14.85, -15.299999999999999 -16.5, 10.200000000000001 -13.200000000000001 C 36.72 -8.25, 50.235 -4.95, 50.235 -1.6500000000000001 Q 52.98 0, 50.235 1.6500000000000001 C 50.235 4.95, 36.72 8.25, 10.200000000000001 13.200000000000001 C -15.299999999999999 16.5, -51.0 14.85, -51.0 0 Z" fill="#ffffff"/><path d="M -25.315000000000005 -17.325 L -17.315000000000005 -17.325 L 0.8349999999999991 17.325 L -7.165000000000001 17.325 Z" fill="#17181c"/></g>
-<g transform="translate(91.79,176.15) rotate(-78)">
-<path d="M 0 0 C -10.8 -29.4, -6.0 -71.39999999999999, 0 -84 C 6.0 -71.39999999999999, 10.8 -29.4, 0 0 Z" transform="rotate(-24)" fill="#ffffff"/>
-<path d="M 0 0 C -12.15 -35.0, -6.75 -85.0, 0 -100 C 6.75 -85.0, 12.15 -35.0, 0 0 Z" transform="rotate(-8)" fill="#ffffff"/>
-<path d="M 0 0 C -11.700000000000001 -33.599999999999994, -6.5 -81.6, 0 -96 C 6.5 -81.6, 11.700000000000001 -33.599999999999994, 0 0 Z" transform="rotate(9)" fill="#ffffff"/>
-<path d="M 0 0 C -10.35 -28.0, -5.75 -68.0, 0 -80 C 5.75 -68.0, 10.35 -28.0, 0 0 Z" transform="rotate(26)" fill="#ffffff"/>
-<path d="M 0 0 C -8.55 -20.299999999999997, -4.75 -49.3, 0 -58 C 4.75 -49.3, 8.55 -20.299999999999997, 0 0 Z" transform="rotate(43)" fill="#ffffff"/>
-</g>
-</g>
+<line x1="34" y1="44" x2="78" y2="90" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="120" y1="32" x2="78" y2="90" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="120" y1="32" x2="162" y2="90" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="206" y1="44" x2="162" y2="90" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="78" y1="90" x2="30" y2="132" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="162" y1="90" x2="210" y2="132" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="78" y1="90" x2="120" y2="132" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="162" y1="90" x2="120" y2="132" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<line x1="120" y1="132" x2="120" y2="210" stroke="#e3e4e6" stroke-width="15" stroke-linecap="round"/>
+<circle cx="34" cy="44" r="26" fill="#e3e4e6"/>
+<circle cx="120" cy="32" r="26" fill="#e3e4e6"/>
+<circle cx="206" cy="44" r="26" fill="#e3e4e6"/>
+<circle cx="78" cy="90" r="24" fill="#e3e4e6"/>
+<circle cx="162" cy="90" r="24" fill="#e3e4e6"/>
+<circle cx="30" cy="132" r="24" fill="#e3e4e6"/>
+<circle cx="210" cy="132" r="24" fill="#e3e4e6"/>
+<circle cx="120" cy="132" r="24" fill="#e3e4e6"/>
+<circle cx="120" cy="210" r="26" fill="#e3e4e6"/>
 </svg>
