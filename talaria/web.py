@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 
-from flask import Flask, Response, jsonify, render_template_string, request
+from flask import Flask, Response, abort, jsonify, render_template_string, request, send_file
 
 from talaria.agent import Agent
 from talaria.cli import build_system
@@ -28,7 +28,26 @@ from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
+from talaria.tools.workspace import WorkspaceError, resolve_path
 from talaria.usage import UsageTracker
+
+# Extensions servable via /workspace-file/<path> for inline chat display —
+# an allowlist rather than serving anything under WORKSPACE_DIR, so an
+# image/video markdown tag can't be (ab)used to read .env-adjacent state
+# files (.history.json, .goals.json, ...) that also live there.
+_MEDIA_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
+    ".mp4", ".webm", ".ogg", ".mov",
+}
+
+WEB_MEDIA_HINT = (
+    "\n\nThis is the web chat UI, which renders Markdown images and "
+    "videos inline. When you create or already have an image/video file "
+    "in the workspace worth showing, reference it in your reply with "
+    "standard Markdown image syntax, e.g. ![description](chart.png) — "
+    "relative paths resolve against the workspace — so it displays "
+    "directly in the chat instead of just being a filename."
+)
 
 INDEX_HTML = r"""<!doctype html>
 <html lang="en">
@@ -130,6 +149,10 @@ INDEX_HTML = r"""<!doctype html>
   .msg h1 { font-size: 1.3em; }
   .msg h2 { font-size: 1.15em; }
   .msg h3 { font-size: 1.05em; }
+  .msg img, .msg video {
+    max-width: 100%; border-radius: 8px; margin: 6px 0; display: block;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
 
   form#composer {
     display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid #ddd;
@@ -164,6 +187,7 @@ INDEX_HTML = r"""<!doctype html>
     .msg .tok-n { color: #d19a66; }
     .msg th, .msg td { border-color: rgba(255, 255, 255, 0.15); }
     .msg th { background: rgba(255, 255, 255, 0.06); }
+    .msg img, .msg video { border-color: rgba(255, 255, 255, 0.12); }
   }
 </style>
 </head>
@@ -289,11 +313,32 @@ function renderTable(block) {
   return '<div class="table-wrap">' + html + "</div>";
 }
 
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogg", "mov"]);
+
+// A relative path (from the model's own workspace-relative filenames)
+// resolves against the /workspace-file/ route below; an http(s)/data URL
+// is used as-is. Segments are encoded individually so a path with a
+// subdirectory still works ("/" itself must survive unencoded).
+function resolveMediaSrc(src) {
+  if (/^(https?:|data:)/i.test(src)) return src;
+  const clean = src.replace(/^\.?\//, "");
+  return "/workspace-file/" + clean.split("/").map(encodeURIComponent).join("/");
+}
+
+function renderMedia(alt, src) {
+  const url = resolveMediaSrc(src);
+  const ext = (src.split(".").pop() || "").toLowerCase();
+  if (VIDEO_EXTENSIONS.has(ext)) {
+    return '<video controls src="' + url + '">' + alt + "</video>";
+  }
+  return '<img src="' + url + '" alt="' + alt + '" loading="lazy">';
+}
+
 // Small, dependency-free renderer for the subset of Markdown models
 // actually use in replies: headings, inline/fenced code, bold, italic,
-// tables, and "- " bullet lists. Input is HTML-escaped first, so nothing
-// the model writes can inject markup — the only tags produced come from
-// here.
+// tables, images/videos, and "- " bullet lists. Input is HTML-escaped
+// first, so nothing the model writes can inject markup — the only tags
+// produced come from here.
 function renderMarkdown(text) {
   let html = escapeHtml(text);
 
@@ -309,6 +354,7 @@ function renderMarkdown(text) {
   });
 
   html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => renderMedia(alt, src));
   html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
   html = html.replace(
@@ -652,7 +698,7 @@ def create_app(config: Config) -> Flask:
         if not user_input:
             return jsonify({"error": "empty message"}), 400
 
-        agent.system = build_system(state["role"], config.notes_file)
+        agent.system = build_system(state["role"], config.notes_file) + WEB_MEDIA_HINT
         history = state["history"]
         history_len_before = len(history)
 
@@ -678,7 +724,7 @@ def create_app(config: Config) -> Flask:
         if not user_input:
             return jsonify({"error": "empty message"}), 400
 
-        agent.system = build_system(state["role"], config.notes_file)
+        agent.system = build_system(state["role"], config.notes_file) + WEB_MEDIA_HINT
         history = state["history"]
         history_len_before = len(history)
 
@@ -783,6 +829,23 @@ def create_app(config: Config) -> Flask:
             except Exception:
                 entries = []
         return jsonify({"entries": entries})
+
+    @app.route("/workspace-file/<path:relpath>")
+    def workspace_file(relpath):
+        # Backs inline ![...](...) image/video rendering in the chat — the
+        # extension allowlist (not just path-sandboxing) matters here since
+        # this is a bare, unauthenticated GET: without it, a crafted
+        # markdown tag could read .env-adjacent state files that also live
+        # under WORKSPACE_DIR (.history.json, .goals.json, ...).
+        if os.path.splitext(relpath)[1].lower() not in _MEDIA_EXTENSIONS:
+            abort(403)
+        try:
+            full_path = resolve_path(config.workspace_dir, relpath)
+        except WorkspaceError:
+            abort(403)
+        if not os.path.isfile(full_path):
+            abort(404)
+        return send_file(full_path)
 
     @app.route("/api/open-workspace", methods=["POST"])
     def open_workspace():
