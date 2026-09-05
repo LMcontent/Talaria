@@ -20,12 +20,14 @@ import threading
 from flask import Flask, Response, abort, jsonify, render_template_string, request, send_file
 
 from talaria.agent import Agent
-from talaria.cli import build_system
 from talaria.compaction import compact_history
 from talaria.config import Config, load_config
+from talaria.cron_scheduler import start_cron_scheduler
 from talaria.memory import clear_history, load_history, save_history
 from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
+from talaria.system_prompt import build_system
+from talaria.tools.cron import load_jobs as load_cron_jobs
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
 from talaria.tools.workspace import WorkspaceError, resolve_path
@@ -291,6 +293,13 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div id="autonomous-log">Loading…</div>
   </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">
+      Cron jobs
+      <a id="cron-refresh" href="#" title="Reload — jobs can be added/changed from chat (cron_add etc.) or by the scheduler firing them">&#8635;</a>
+    </div>
+    <div id="cron-list">Loading…</div>
+  </div>
   <div class="sidebar-section sidebar-tools">
     <div class="sidebar-section-title">Tools</div>
     <div id="tools-list">Loading…</div>
@@ -317,6 +326,8 @@ const toolsList = document.getElementById("tools-list");
 const usageBox = document.getElementById("usage-box");
 const autonomousLog = document.getElementById("autonomous-log");
 const autonomousLogRefresh = document.getElementById("autonomous-log-refresh");
+const cronList = document.getElementById("cron-list");
+const cronRefresh = document.getElementById("cron-refresh");
 const sidebar = document.getElementById("sidebar");
 const sidebarResizer = document.getElementById("sidebar-resizer");
 const modeToggle = document.getElementById("mode-toggle");
@@ -757,6 +768,37 @@ autonomousLogRefresh.addEventListener("click", (e) => {
   loadAutonomousLog();
 });
 
+async function loadCronJobs() {
+  const res = await fetch("/api/cron");
+  const data = await res.json();
+  cronList.innerHTML = "";
+  if (!data.jobs.length) {
+    cronList.textContent = "(no cron jobs — ask the agent to schedule one with cron_add)";
+    return;
+  }
+  for (const j of data.jobs) {
+    const item = document.createElement("div");
+    item.className = "log-item";
+    const when = document.createElement("div");
+    when.className = "tname";
+    const label = j.name ? j.name + " — " : "";
+    when.textContent = "#" + j.id + " " + label + j.schedule + (j.enabled ? "" : " (disabled)");
+    const desc = document.createElement("div");
+    desc.className = "tdesc";
+    desc.textContent = "last run: " + (j.last_run ? formatLogTimestamp(j.last_run) : "never");
+    item.appendChild(when);
+    item.appendChild(desc);
+    cronList.appendChild(item);
+  }
+}
+loadCronJobs();
+
+cronRefresh.addEventListener("click", (e) => {
+  e.preventDefault();
+  cronList.textContent = "Loading…";
+  loadCronJobs();
+});
+
 function applyMode(safe) {
   modeToggle.checked = !safe;
   modeLabel.textContent = safe ? "Safe mode" : "Extreme mode";
@@ -875,6 +917,10 @@ def create_app(config: Config) -> Flask:
         max_turns=config.max_turns, usage=usage,
     )
     agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent, usage=usage)])
+    # Runs jobs scheduled via cron_add for as long as this process stays up
+    # — see talaria/cron_scheduler.py for why that's an acceptable
+    # limitation at this stage.
+    start_cron_scheduler(config, provider, usage)
     chat_lock = threading.Lock()
 
     @app.route("/")
@@ -1035,6 +1081,14 @@ def create_app(config: Config) -> Flask:
             except Exception:
                 entries = []
         return jsonify({"entries": entries})
+
+    @app.route("/api/cron")
+    def cron_endpoint():
+        # Jobs are also added/edited by the agent itself (cron_add etc.,
+        # talaria/tools/cron.py) from any chat turn, not just this
+        # process's own scheduler thread — read fresh from disk rather
+        # than caching.
+        return jsonify({"jobs": load_cron_jobs(config.workspace_dir)})
 
     @app.route("/workspace-file/<path:relpath>")
     def workspace_file(relpath):

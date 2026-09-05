@@ -260,6 +260,21 @@ def test_tools_endpoint_lists_builtin_tools(app_factory):
     assert "install_package" in names
     assert "remember" in names
     assert "propose_skill" in names
+    assert "cron_add" in names
+
+
+def test_cron_endpoint_lists_jobs_added_from_chat(app_factory):
+    from talaria.tools.cron import cron_add
+
+    client, config, _ = app_factory([])
+    assert client.get("/api/cron").get_json() == {"jobs": []}
+
+    cron_add(config.workspace_dir, "0 9 * * *", "check the news", name="Morning check")
+
+    jobs = client.get("/api/cron").get_json()["jobs"]
+    assert len(jobs) == 1
+    assert jobs[0]["name"] == "Morning check"
+    assert jobs[0]["schedule"] == "0 9 * * *"
 
 
 def test_stop_returns_409_when_nothing_is_generating(app_factory):

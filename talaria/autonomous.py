@@ -18,21 +18,20 @@ and any already-installed skill (those were security-reviewed when
 approved via propose_skill in an earlier, attended session).
 """
 
-import json
-import os
 import sys
 import time
 from datetime import datetime, timezone
 
 from talaria.agent import Agent
-from talaria.cli import build_system
 from talaria.config import Config, load_config
 from talaria.providers import make_provider
 from talaria.providers.base import Provider, ToolSpec
 from talaria.roles import DEFAULT_ROLE, ROLES
+from talaria.system_prompt import build_system
 from talaria.tools.goals import goal_focus
 from talaria.tools.registry import build_tools
 from talaria.usage import UsageTracker
+from talaria.workspace_log import append_log
 
 # Tools that normally require an attended y/N confirmation, or that hand
 # out the full unfiltered tool set again (delegate_task's sub-agents,
@@ -53,28 +52,7 @@ PROMPT_TEMPLATE = (
 )
 
 
-def _log_path(workspace_dir: str) -> str:
-    return os.path.join(workspace_dir, ".autonomous_log.json")
-
-
-def _append_log(workspace_dir: str, entry: dict) -> None:
-    path = _log_path(workspace_dir)
-    os.makedirs(workspace_dir, exist_ok=True)
-    entries = []
-    if os.path.isfile(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                entries = json.load(f)
-            if not isinstance(entries, list):
-                entries = []
-        except Exception:
-            entries = []
-    entries.append(entry)
-    entries = entries[-200:]
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(entries, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+_LOG_FILENAME = ".autonomous_log.json"
 
 
 def build_autonomous_tools(config: Config, provider: Provider) -> list[ToolSpec]:
@@ -102,7 +80,7 @@ def tick(config: Config, provider: Provider, usage: UsageTracker) -> str | None:
     reply = agent.run(prompt)
     print()
 
-    _append_log(config.workspace_dir, {
+    append_log(config.workspace_dir, _LOG_FILENAME, {
         "ts": datetime.now(timezone.utc).isoformat(),
         "focus": focus,
         "reply": reply,
