@@ -97,16 +97,16 @@ def test_index_page_shows_claude_model_when_that_provider_is_active(app_factory)
 def test_index_page_embeds_the_logo_next_to_the_title(app_factory):
     client, _, _ = app_factory([])
     body = client.get("/").get_data(as_text=True)
-    assert '<span class="brand-logo"><svg' in body
+    assert '<img class="brand-logo" src="data:image/png;base64,' in body
     assert "<h1>Talaria</h1>" in body
 
 
-def test_load_logo_svg_reads_the_real_asset_file():
-    from talaria.web import _load_logo_svg
+def test_load_logo_data_uri_reads_the_real_asset_file():
+    from talaria.web import _load_logo_data_uri
 
-    svg = _load_logo_svg()
-    assert svg.startswith("<svg")
-    assert "</svg>" in svg
+    src = _load_logo_data_uri()
+    assert src.startswith("data:image/png;base64,")
+    assert len(src) > len("data:image/png;base64,")
 
 
 def test_chat_rejects_empty_message(app_factory):

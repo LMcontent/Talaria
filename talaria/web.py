@@ -43,14 +43,21 @@ _MEDIA_EXTENSIONS = {
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
 
-def _load_logo_svg() -> str:
+def _load_logo_data_uri() -> str:
     # Read fresh from disk rather than baking it into this module, so
-    # replacing assets/logo.svg (as happened twice already) doesn't also
-    # require touching this file. Empty string (renders nothing) if it's
-    # ever missing, rather than a broken-image icon or a hard failure.
+    # replacing assets/logo.png (as happened more than once already)
+    # doesn't also require touching this file. Embedded as a data: URI
+    # rather than served from a route, since there's no static-file
+    # serving set up for assets/ (unlike WORKSPACE_DIR's dedicated
+    # /workspace-file/ route) and this file is small. Empty string
+    # (renders nothing) if it's ever missing, rather than a broken-image
+    # icon or a hard failure.
+    import base64
+
     try:
-        with open(os.path.join(_ASSETS_DIR, "logo.svg"), "r", encoding="utf-8") as f:
-            return f.read()
+        with open(os.path.join(_ASSETS_DIR, "logo.png"), "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
     except OSError:
         return ""
 
@@ -83,11 +90,10 @@ INDEX_HTML = r"""<!doctype html>
     border-right: 1px solid #ddd; background: #fafafa; padding: 16px;
   }
   .brand { display: flex; align-items: center; gap: 8px; }
-  .brand-logo { display: flex; flex-shrink: 0; }
   /* Sized to the cap-height of the "T" next to it (h1 is 24px), not the
      full line box — an icon at font-size would look oversized next to
      text this size. */
-  .brand-logo svg { display: block; height: 17px; width: auto; }
+  .brand-logo { display: block; height: 17px; width: auto; flex-shrink: 0; }
   #sidebar h1 { font-size: 24px; margin: 0 0 2px; }
   #sidebar .meta { font-size: 18px; color: #666; margin-bottom: 18px; }
   .sidebar-section { margin-bottom: 18px; }
@@ -215,7 +221,7 @@ INDEX_HTML = r"""<!doctype html>
 <body>
 <div id="sidebar">
   <div class="brand">
-    <span class="brand-logo">{{ logo_svg|safe }}</span>
+    <img class="brand-logo" src="{{ logo_src }}" alt="">
     <h1>Talaria</h1>
   </div>
   <div class="meta">provider: {{ provider_name }} &middot; model: {{ model_name }}</div>
@@ -713,7 +719,7 @@ def create_app(config: Config) -> Flask:
             model_name=model_name,
             role=state["role"],
             roles=ROLES,
-            logo_svg=_load_logo_svg(),
+            logo_src=_load_logo_data_uri(),
         )
 
     @app.route("/api/chat", methods=["POST"])
