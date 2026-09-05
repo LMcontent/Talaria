@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 
 import pytest
 
@@ -300,6 +301,60 @@ def test_stop_cancels_generation_mid_stream(app_factory_with_provider):
 
     # Nothing is generating anymore, so a second stop is a no-op.
     assert client.post("/api/chat/stop").status_code == 409
+
+
+def test_generating_endpoint_reflects_an_in_flight_stream(app_factory_with_provider):
+    provider = InterruptibleProvider(["one ", "two "])
+    client, config = app_factory_with_provider(provider)
+
+    assert client.get("/api/generating").get_json() == {"generating": False}
+
+    t = threading.Thread(target=lambda: client.post("/api/chat/stream", json={"message": "go"}))
+    t.start()
+
+    assert provider.first_chunk_sent.wait(timeout=5), "provider never emitted its first chunk"
+    assert client.get("/api/generating").get_json() == {"generating": True}
+
+    provider.may_continue.set()
+    t.join(timeout=5)
+    assert not t.is_alive(), "request thread never finished"
+
+    # t.join() only confirms the HTTP view function returned (which happens
+    # as soon as the first chunk is queued) — the worker thread that actually
+    # finishes the generation and clears cancel_event keeps running a little
+    # longer, so poll for it rather than asserting immediately.
+    for _ in range(50):
+        if not client.get("/api/generating").get_json()["generating"]:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("generation never finished")
+
+
+def test_stream_reply_is_saved_even_if_the_client_never_reads_the_response(app_factory_with_provider):
+    # A browser tab reloaded or closed mid-stream stops reading the HTTP
+    # response, but the worker thread it kicked off keeps running server-side
+    # regardless — the reply it produces must still land in history instead
+    # of silently vanishing because nothing was left consuming the stream.
+    provider = InterruptibleProvider(["Hello", " world"])
+    client, config = app_factory_with_provider(provider)
+
+    resp = client.post("/api/chat/stream", json={"message": "hi"})
+    assert resp.status_code == 200
+    # Deliberately never call resp.get_data() / iterate the body — that's
+    # what actually drains the streaming generator, so skipping it simulates
+    # a client that disconnected right after the response headers arrived.
+
+    provider.may_continue.set()
+    for _ in range(50):
+        if not client.get("/api/generating").get_json()["generating"]:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("generation never finished")
+
+    turns = client.get("/api/history").get_json()["turns"]
+    assert turns[-1] == {"role": "assistant", "text": "Hello world"}
 
 
 def test_usage_endpoint_starts_at_zero(app_factory):
