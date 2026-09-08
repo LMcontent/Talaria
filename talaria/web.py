@@ -183,6 +183,33 @@ INDEX_HTML = r"""<!doctype html>
   }
   .working-timer { font-variant-numeric: tabular-nums; }
 
+  /* Thinking / tool-call blocks: what would otherwise only ever print to
+     the terminal running this server (see talaria/agent.py's
+     EventCallback), shown as small collapsible panels above the reply
+     text — the thinking block starts expanded (it streams live) and
+     collapses once real reply text starts; tool-call blocks start
+     collapsed (their result arrives all at once, not token by token) and
+     expand on click. */
+  .think-block, .tool-call-block {
+    margin-bottom: 8px; font-size: 16px; border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px; overflow: hidden;
+  }
+  .think-header, .tool-call-header {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.03); color: #666; cursor: pointer; user-select: none;
+  }
+  .think-toggle, .tool-toggle { display: inline-block; transition: transform 0.15s; font-size: 0.8em; }
+  .think-block.expanded .think-toggle, .tool-call-block.expanded .tool-toggle { transform: rotate(90deg); }
+  .think-body, .tool-call-body {
+    display: none; padding: 8px 10px; font-size: 0.85em; color: #555;
+    white-space: pre-wrap; word-wrap: break-word; border-top: 1px solid rgba(0, 0, 0, 0.06);
+    max-height: 300px; overflow-y: auto;
+  }
+  .think-block.expanded .think-body, .tool-call-block.expanded .tool-call-body { display: block; }
+  .tool-name { font-family: ui-monospace, monospace; font-weight: 600; }
+  .tool-args { color: #888; font-family: ui-monospace, monospace; font-size: 0.85em; }
+  .tool-status { margin-left: auto; font-style: italic; color: #999; font-size: 0.85em; }
+
   .msg code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: rgba(0, 0, 0, 0.07); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
@@ -249,6 +276,10 @@ INDEX_HTML = r"""<!doctype html>
     .msg th, .msg td { border-color: rgba(255, 255, 255, 0.15); }
     .msg th { background: rgba(255, 255, 255, 0.06); }
     .msg img, .msg video { border-color: rgba(255, 255, 255, 0.12); }
+    .think-block, .tool-call-block { border-color: rgba(255, 255, 255, 0.1); }
+    .think-header, .tool-call-header { background: rgba(255, 255, 255, 0.04); color: #aaa; }
+    .think-body, .tool-call-body { color: #bbb; border-top-color: rgba(255, 255, 255, 0.08); }
+    .tool-args, .tool-status { color: #888; }
   }
 </style>
 </head>
@@ -344,6 +375,20 @@ function escapeHtml(s) {
 // Only used for values embedded inside an attribute, never for content.
 function escapeAttr(s) {
   return s.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// A compact one-line preview of a tool call's arguments for the tool-call
+// header — e.g. web_search(query: "talaria greek mythology"). Mirrors
+// _format_tool_call() in talaria/agent.py (same truncation length), which
+// formats the same call for the terminal log.
+function formatToolArgs(input) {
+  if (!input || typeof input !== "object") return "";
+  const parts = Object.entries(input).map(([k, v]) => {
+    let s = JSON.stringify(v);
+    if (s && s.length > 80) s = s.slice(0, 77) + "...";
+    return k + ": " + s;
+  });
+  return parts.length ? "(" + parts.join(", ") + ")" : "";
 }
 
 // Best-effort token coloring for Python fenced code blocks. Runs on text
@@ -647,8 +692,92 @@ form.addEventListener("submit", async (e) => {
   stopRequested = false;
   startWorkingIndicator();
 
+  // One assistant turn can carry, in order: a thinking block, zero or more
+  // tool-call blocks, then the final reply text — all three are things
+  // that used to only ever print to this server's own terminal (see
+  // talaria/agent.py's EventCallback). turnDiv is created lazily on
+  // whichever of those happens first, replacing the working indicator.
+  let turnDiv = null;
+  let thinkBlock = null;
+  let thinkBody = null;
+  let thinkText = "";
+  const pendingToolBlocks = [];
   let replyDiv = null;
   let fullText = "";
+
+  function ensureTurnDiv() {
+    if (!turnDiv) {
+      if (workingDiv) { workingDiv.remove(); workingDiv = null; }
+      turnDiv = document.createElement("div");
+      turnDiv.className = "msg assistant";
+      messagesEl.appendChild(turnDiv);
+    }
+    return turnDiv;
+  }
+
+  function handleStreamEvent(evt) {
+    if (evt.type === "thinking") {
+      ensureTurnDiv();
+      if (!thinkBlock) {
+        thinkBlock = document.createElement("div");
+        thinkBlock.className = "think-block expanded";
+        const header = document.createElement("div");
+        header.className = "think-header";
+        header.innerHTML = '<span class="think-toggle">▸</span> Thinking';
+        header.addEventListener("click", () => thinkBlock.classList.toggle("expanded"));
+        thinkBody = document.createElement("div");
+        thinkBody.className = "think-body";
+        thinkBlock.appendChild(header);
+        thinkBlock.appendChild(thinkBody);
+        turnDiv.appendChild(thinkBlock);
+      }
+      thinkText += evt.text;
+      thinkBody.textContent = thinkText;
+    } else if (evt.type === "tool_call") {
+      ensureTurnDiv();
+      const block = document.createElement("div");
+      block.className = "tool-call-block";
+      const header = document.createElement("div");
+      header.className = "tool-call-header";
+      header.innerHTML =
+        '<span class="tool-toggle">▸</span> <span class="tool-name">' +
+        escapeHtml(evt.name) + "</span>" +
+        '<span class="tool-args">' + escapeHtml(formatToolArgs(evt.input)) + "</span>" +
+        '<span class="tool-status">running…</span>';
+      const body = document.createElement("div");
+      body.className = "tool-call-body";
+      block.appendChild(header);
+      block.appendChild(body);
+      header.addEventListener("click", () => block.classList.toggle("expanded"));
+      turnDiv.appendChild(block);
+      pendingToolBlocks.push({ header, body });
+    } else if (evt.type === "tool_result") {
+      // Tool calls run one at a time, in the same order their results
+      // arrive in, so pairing by FIFO order (rather than needing the
+      // backend to invent and track an id) is always correct here.
+      const pending = pendingToolBlocks.shift();
+      if (pending) {
+        const status = pending.header.querySelector(".tool-status");
+        if (status) status.remove();
+        pending.body.textContent = evt.result;
+      }
+    } else if (evt.type === "chunk") {
+      ensureTurnDiv();
+      // The thinking block streamed live while it was happening — once
+      // real reply text starts, collapse it out of the way (still there,
+      // one click away) instead of leaving two things visibly growing
+      // at once.
+      if (thinkBlock) thinkBlock.classList.remove("expanded");
+      if (!replyDiv) {
+        replyDiv = document.createElement("div");
+        turnDiv.appendChild(replyDiv);
+      }
+      fullText += evt.text;
+      replyDiv.innerHTML = renderMarkdown(fullText);
+    } else if (evt.type === "error") {
+      addMessage("Error: " + evt.message, "error");
+    }
+  }
 
   try {
     const res = await fetch("/api/chat/stream", {
@@ -663,27 +792,34 @@ form.addEventListener("submit", async (e) => {
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunkText = decoder.decode(value, { stream: true });
-      if (!chunkText) continue;
-      // Only follow the stream to the bottom if the user was already
-      // there — lets them scroll up and read older messages while a
-      // reply is still being generated, instead of getting yanked back
-      // down on every chunk.
-      const wasNearBottom = isNearBottom();
-      if (!replyDiv) {
-        if (workingDiv) { workingDiv.remove(); workingDiv = null; }
-        replyDiv = addMessage("", "assistant", true, false);
-      }
-      fullText += chunkText;
-      replyDiv.innerHTML = renderMarkdown(fullText);
-      if (wasNearBottom) {
-        scrollEl.scrollTop = scrollEl.scrollHeight;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        let evt;
+        try {
+          evt = JSON.parse(line);
+        } catch (parseErr) {
+          continue;
+        }
+        // Only follow the stream to the bottom if the user was already
+        // there — lets them scroll up and read older messages while a
+        // reply is still being generated, instead of getting yanked back
+        // down on every event.
+        const wasNearBottom = isNearBottom();
+        handleStreamEvent(evt);
+        if (wasNearBottom) {
+          scrollEl.scrollTop = scrollEl.scrollHeight;
+        }
       }
     }
-    if (!replyDiv) {
+    if (!turnDiv) {
       addMessage("(no response)", "pending");
     } else if (stopRequested) {
       addMessage("(generation stopped)", "pending");
@@ -1035,19 +1171,20 @@ def create_app(config: Config) -> Flask:
                     agent.run(
                         user_input,
                         history=history,
-                        on_chunk=lambda t: q.put(("chunk", t)),
+                        on_chunk=lambda t: q.put(("chunk", {"text": t})),
+                        on_event=lambda etype, data: q.put((etype, data)),
                         cancel_event=cancel_event,
                     )
                 print()
                 state["history"] = compact_history(history, config.max_history_turns)
                 save_history(config.memory_file, state["history"])
                 state["cancel_event"] = None
-                q.put(("done", ""))
+                q.put(("done", {}))
             except Exception as e:
                 print(f"\n[web] error: {e}")
                 del history[history_len_before:]
                 state["cancel_event"] = None
-                q.put(("error", str(e)))
+                q.put(("error", {"message": str(e)}))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1055,26 +1192,37 @@ def create_app(config: Config) -> Flask:
         # very first thing that happens is an error (by far the most common
         # case — bad key, connection refused, etc., all fail before any text
         # streams), we can still return a clean JSON 4xx/5xx instead of
-        # starting a 200 stream. Only once text has actually started do we
-        # commit to a streaming response.
+        # starting a 200 stream. Only once something has actually started
+        # (a chunk, a thinking delta, a tool call, ...) do we commit to a
+        # streaming response.
         first_kind, first_payload = q.get()
 
         if first_kind == "error":
-            return jsonify({"error": first_payload}), 500
+            return jsonify({"error": first_payload["message"]}), 500
 
         if first_kind == "done":
-            return Response("", mimetype="text/plain")
+            return Response("", mimetype="application/x-ndjson")
+
+        # Newline-delimited JSON: one {"type": ..., ...} object per line, so
+        # the browser can tell a reply-text chunk apart from a thinking
+        # delta, a tool call, or a tool result — the same things that were
+        # previously only ever printed to this server's own terminal (see
+        # talaria/agent.py's EventCallback) — instead of just concatenating
+        # everything into one plain-text blob.
+        def encode(kind, payload):
+            return json.dumps({"type": kind, **payload}, ensure_ascii=False) + "\n"
 
         def generate():
-            yield first_payload
+            yield encode(first_kind, first_payload)
             while True:
                 kind, payload = q.get()
-                if kind == "chunk":
-                    yield payload
-                elif kind in ("error", "done"):
+                if kind in ("error", "done"):
+                    if kind == "error":
+                        yield encode("error", payload)
                     return
+                yield encode(kind, payload)
 
-        return Response(generate(), mimetype="text/plain")
+        return Response(generate(), mimetype="application/x-ndjson")
 
     @app.route("/api/chat/stop", methods=["POST"])
     def chat_stop():

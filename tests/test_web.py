@@ -151,14 +151,46 @@ def test_chat_stream_error_returns_clean_json_before_any_streaming(app_factory_w
     assert client.get("/api/history").get_json()["turns"] == []
 
 
+def _ndjson_events(body: str) -> list[dict]:
+    return [json.loads(line) for line in body.splitlines() if line]
+
+
+def _chunk_text(body: str) -> str:
+    return "".join(e["text"] for e in _ndjson_events(body) if e["type"] == "chunk")
+
+
 def test_chat_stream_streams_full_reply(app_factory):
     client, config, _ = app_factory([ProviderResponse(text="streamed answer", tool_calls=[])])
 
     resp = client.post("/api/chat/stream", json={"message": "hello"})
 
     assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    assert body == "streamed answer"
+    assert resp.mimetype == "application/x-ndjson"
+    assert _chunk_text(resp.get_data(as_text=True)) == "streamed answer"
+
+
+def test_chat_stream_carries_tool_call_and_tool_result_events(app_factory):
+    from talaria.providers.base import ToolCall
+
+    client, _, _ = app_factory(
+        [
+            ProviderResponse(
+                text="", tool_calls=[ToolCall(id="1", name="remember", input={"text": "likes tea"})]
+            ),
+            ProviderResponse(text="Noted.", tool_calls=[]),
+        ]
+    )
+
+    resp = client.post("/api/chat/stream", json={"message": "I like tea"})
+
+    events = _ndjson_events(resp.get_data(as_text=True))
+    types = [e["type"] for e in events]
+    assert types == ["tool_call", "tool_result", "chunk"]
+    assert events[0]["name"] == "remember"
+    assert events[0]["input"] == {"text": "likes tea"}
+    assert events[1]["name"] == "remember"
+    assert "Remembered" in events[1]["result"]
+    assert events[2]["text"] == "Noted."
 
 
 def test_chat_stream_rejects_empty_message(app_factory):
@@ -309,7 +341,7 @@ def test_stop_cancels_generation_mid_stream(app_factory_with_provider):
     # made it into the response body — generation was actually cut short,
     # not just hidden client-side.
     assert result["status"] == 200
-    assert result["body"] == "one "
+    assert _chunk_text(result["body"]) == "one "
 
     turns = client.get("/api/history").get_json()["turns"]
     assert turns[-1] == {"role": "assistant", "text": "one "}

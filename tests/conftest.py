@@ -21,7 +21,7 @@ class ScriptedProvider(Provider):
         self._responses = list(responses)
         self.calls: list[dict] = []
 
-    def chat(self, history, system, tools, on_chunk=None, cancel_event=None):
+    def chat(self, history, system, tools, on_chunk=None, on_event=None, cancel_event=None):
         self.calls.append(
             {
                 "history": list(history),
@@ -48,7 +48,7 @@ class RaisingProvider(Provider):
     def __init__(self, exc: Exception):
         self.exc = exc
 
-    def chat(self, history, system, tools, on_chunk=None, cancel_event=None):
+    def chat(self, history, system, tools, on_chunk=None, on_event=None, cancel_event=None):
         raise self.exc
 
 
@@ -65,7 +65,7 @@ class InterruptibleProvider(Provider):
         self.first_chunk_sent = threading.Event()
         self.may_continue = threading.Event()
 
-    def chat(self, history, system, tools, on_chunk=None, cancel_event=None):
+    def chat(self, history, system, tools, on_chunk=None, on_event=None, cancel_event=None):
         text_parts: list[str] = []
         for i, chunk in enumerate(self.chunks):
             if cancel_event and cancel_event.is_set():

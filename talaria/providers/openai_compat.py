@@ -5,7 +5,7 @@ from typing import Callable
 import httpx2
 from openai import DefaultHttpxClient, OpenAI
 
-from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
+from talaria.providers.base import EventCallback, Provider, ProviderResponse, ToolCall, ToolSpec
 
 
 class OpenAICompatProvider(Provider):
@@ -64,6 +64,7 @@ class OpenAICompatProvider(Provider):
         system: str,
         tools: list[ToolSpec],
         on_chunk: Callable[[str], None] | None = None,
+        on_event: EventCallback | None = None,
         cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
         messages = [{"role": "system", "content": system}, *_to_openai_messages(history)]
@@ -110,6 +111,15 @@ class OpenAICompatProvider(Provider):
                 print(delta.content, end="", flush=True)
                 if on_chunk:
                     on_chunk(delta.content)
+
+            # Not part of the standard OpenAI wire format, but several
+            # OpenAI-compatible routers relay a reasoning-model's chain of
+            # thought this way (either field name, depending on the
+            # router) — surfaced the same way Claude's thinking is, on a
+            # best-effort basis, since there's no schema to check against.
+            reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+            if reasoning and on_event:
+                on_event("thinking", {"text": reasoning})
 
             for tc_delta in delta.tool_calls or []:
                 acc = tool_call_chunks.setdefault(

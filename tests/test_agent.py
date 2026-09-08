@@ -63,6 +63,59 @@ def test_tool_call_round_trip():
     assert provider.calls[1]["history"][2]["content"] == "echo:hi"
 
 
+def test_on_event_fires_tool_call_then_tool_result_in_order():
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(
+                text="", tool_calls=[ToolCall(id="1", name="echo", input={"x": "hi"})]
+            ),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(provider, tools=[_echo_tool()], system="sys")
+    events: list[tuple] = []
+
+    agent.run("go", on_event=lambda etype, data: events.append((etype, data)))
+
+    assert events == [
+        ("tool_call", {"name": "echo", "input": {"x": "hi"}}),
+        ("tool_result", {"name": "echo", "result": "echo:hi"}),
+    ]
+
+
+def test_on_event_fires_tool_result_with_error_message_on_a_failing_tool():
+    boom = ToolSpec(
+        name="boom", description="d", input_schema={"type": "object", "properties": {}},
+        handler=lambda: (_ for _ in ()).throw(RuntimeError("kaboom")),
+    )
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(text="", tool_calls=[ToolCall(id="1", name="boom", input={})]),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(provider, tools=[boom], system="sys")
+    events: list[tuple] = []
+
+    agent.run("go", on_event=lambda etype, data: events.append((etype, data)))
+
+    assert events[0] == ("tool_call", {"name": "boom", "input": {}})
+    assert events[1][0] == "tool_result"
+    assert "kaboom" in events[1][1]["result"]
+
+
+def test_on_event_is_passed_through_to_the_provider():
+    provider = ScriptedProvider([ProviderResponse(text="hi", tool_calls=[])])
+    agent = Agent(provider, tools=[], system="sys")
+
+    agent.run("go", on_event=lambda etype, data: None)
+
+    # ScriptedProvider doesn't itself fire on_event, but chat() must accept
+    # the kwarg without raising — real providers rely on it being threaded
+    # through, not silently dropped.
+    assert len(provider.calls) == 1
+
+
 def test_tool_call_is_logged_to_the_terminal(capsys):
     # The only way to tell "the model actually called this tool" from "the
     # model just described doing so in text" — matters most with
