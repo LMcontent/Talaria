@@ -1,7 +1,7 @@
 import threading
 from typing import Callable
 
-from talaria.providers.base import Provider, ToolSpec
+from talaria.providers.base import EventCallback, Provider, ToolSpec
 from talaria.usage import UsageTracker
 
 DEFAULT_SYSTEM = (
@@ -37,6 +37,7 @@ class Agent:
         user_input: str,
         history: list[dict] | None = None,
         on_chunk: Callable[[str], None] | None = None,
+        on_event: EventCallback | None = None,
         cancel_event: threading.Event | None = None,
     ) -> str:
         """Run one turn. If `history` is given, it is mutated in place with
@@ -44,9 +45,13 @@ class Agent:
         reusing the same list across turns for a multi-turn conversation.
         `on_chunk`, if given, is called with each text delta as it streams
         in (in addition to the provider always printing it to stdout).
-        `cancel_event`, if given and set while a reply is streaming, cuts
-        generation short and returns whatever text was produced so far —
-        used by the web UI's stop button.
+        `on_event`, if given, is called for model thinking (passed through
+        to the provider) as well as this agent's own tool_call/tool_result
+        events (see EventCallback in talaria/providers/base.py) — lets a
+        caller like the web UI surface what's normally only printed to the
+        terminal. `cancel_event`, if given and set while a reply is
+        streaming, cuts generation short and returns whatever text was
+        produced so far — used by the web UI's stop button.
         """
         if history is None:
             history = []
@@ -66,7 +71,7 @@ class Agent:
 
             response = self.provider.chat(
                 history, system=self.system, tools=self.tools, on_chunk=on_chunk,
-                cancel_event=cancel_event,
+                on_event=on_event, cancel_event=cancel_event,
             )
             if self.usage and response.usage:
                 self.usage.add(response.usage.get("input_tokens", 0), response.usage.get("output_tokens", 0))
@@ -82,7 +87,7 @@ class Agent:
                 return response.text
 
             for call in response.tool_calls:
-                result = self._call_tool(call.name, call.input)
+                result = self._call_tool(call.name, call.input, on_event=on_event)
                 history.append(
                     {
                         "role": "tool",
@@ -109,7 +114,7 @@ class Agent:
             self.tools_by_name[t.name] = t
         self.tools = list(self.tools_by_name.values())
 
-    def _call_tool(self, name: str, tool_input: dict) -> str:
+    def _call_tool(self, name: str, tool_input: dict, on_event: EventCallback | None = None) -> str:
         tool = self.tools_by_name.get(name)
         if tool is None:
             return f"Error: unknown tool {name!r}"
@@ -119,10 +124,15 @@ class Agent:
         # it would", which matters a lot with local/smaller models that
         # sometimes narrate an action instead of emitting a real tool call.
         print(f"\n[tool] {_format_tool_call(name, tool_input)}", flush=True)
+        if on_event:
+            on_event("tool_call", {"name": name, "input": tool_input})
         try:
-            return str(tool.handler(**tool_input))
+            result = str(tool.handler(**tool_input))
         except Exception as e:
-            return f"Error running tool {name}: {e}"
+            result = f"Error running tool {name}: {e}"
+        if on_event:
+            on_event("tool_result", {"name": name, "result": result})
+        return result
 
 
 def _format_tool_call(name: str, tool_input: dict) -> str:

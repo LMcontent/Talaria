@@ -170,6 +170,21 @@ def test_show_thinking_requests_adaptive_display_and_prints_markers(monkeypatch,
     assert out.index("[/thinking]") < out.index("answer")
 
 
+def test_show_thinking_fires_on_event_for_each_thinking_delta():
+    provider = ClaudeProvider(api_key="x", model="claude-opus-5", show_thinking=True)
+    events = [
+        _event("content_block_delta", "thinking_delta", thinking="pondering"),
+        _event("content_block_delta", "thinking_delta", thinking="..."),
+        _event("content_block_delta", "text_delta", text="answer"),
+    ]
+    _wire_stream(provider, events, _final_message(text="answer"))
+
+    seen: list[tuple] = []
+    provider.chat([], system="sys", tools=[], on_event=lambda etype, data: seen.append((etype, data)))
+
+    assert seen == [("thinking", {"text": "pondering"}), ("thinking", {"text": "..."})]
+
+
 def test_show_thinking_false_never_sends_thinking_param(provider):
     calls = _wire_stream(provider, [_event("message_stop")], _final_message(text="ok"))
     provider.chat([], system="sys", tools=[])

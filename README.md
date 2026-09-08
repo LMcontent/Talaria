@@ -338,6 +338,26 @@ effect on the very next tool call with no restart needed. The prompt
 itself still only ever appears in the terminal running the server, never
 in the browser.
 
+### Thinking and tool-call visibility in the web UI
+
+Model "thinking"/reasoning and every tool call (with its result) used to
+only ever print to the terminal running the server — the web UI now shows
+them too, as small collapsible panels above each reply, the way most chat
+UIs surface this. A thinking panel streams live (visible while it's
+happening) and collapses once the real reply starts; each tool call shows
+up immediately as `tool_name(args)` with a "running…" status, then
+collapses to just its name once the result comes back — click either to
+expand/collapse. This is purely a live view of the current turn, not
+persisted anywhere new — reloading the page (see `/api/history`) still
+only restores the final text of past turns, the same as before.
+
+Thinking only ever appears with `LLM_PROVIDER=claude` and
+`CLAUDE_SHOW_THINKING=true` (see below) — nothing to show otherwise. It
+also shows up automatically for any OpenAI-compatible router that relays
+a reasoning model's chain of thought via a `reasoning_content`/`reasoning`
+delta field (not all of them do; this is best-effort, since it's not part
+of the standard OpenAI wire format).
+
 ### Reasoning depth and turn limits
 
 Genuinely multi-step or creative tasks (several tool calls, install a

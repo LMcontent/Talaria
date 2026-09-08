@@ -5,7 +5,7 @@ import anthropic
 import httpx2
 from anthropic import DefaultHttpxClient
 
-from talaria.providers.base import Provider, ProviderResponse, ToolCall, ToolSpec
+from talaria.providers.base import EventCallback, Provider, ProviderResponse, ToolCall, ToolSpec
 
 
 class ClaudeProvider(Provider):
@@ -30,6 +30,7 @@ class ClaudeProvider(Provider):
         system: str,
         tools: list[ToolSpec],
         on_chunk: Callable[[str], None] | None = None,
+        on_event: EventCallback | None = None,
         cancel_event: threading.Event | None = None,
     ) -> ProviderResponse:
         stream_kwargs: dict = dict(
@@ -69,6 +70,8 @@ class ClaudeProvider(Provider):
                             print("\n[thinking] ", end="", flush=True)
                             thinking_open = True
                         print(event.delta.thinking, end="", flush=True)
+                        if on_event:
+                            on_event("thinking", {"text": event.delta.thinking})
                 if cancel_event and cancel_event.is_set():
                     cancelled = True
                     break
