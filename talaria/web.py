@@ -338,6 +338,14 @@ function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// escapeHtml (above) leaves quotes alone — fine for element content, but
+// an href built from unescaped input could smuggle in a quote and break
+// out of the attribute (e.g. a URL containing '" onmouseover="...').
+// Only used for values embedded inside an attribute, never for content.
+function escapeAttr(s) {
+  return s.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 // Best-effort token coloring for Python fenced code blocks. Runs on text
 // that is already HTML-escaped, in one pass so a keyword inside a string
 // or comment can't get colored twice. Any other/unknown language is left
@@ -439,6 +447,40 @@ function renderMarkdown(text) {
 
   html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => renderMedia(alt, src));
+
+  // Links — both `[text](url)` and bare URLs the model just pasted
+  // in-line. Each is pulled into a placeholder (like the code blocks
+  // above) as soon as it's built, so the bare-URL pass below can't reach
+  // back into an href/text an earlier match already produced, and so
+  // neither pass can be confused by a URL appearing inside link text.
+  // Scheme is restricted to http(s)/mailto by the regexes themselves —
+  // nothing else (e.g. javascript:) can ever reach an href here.
+  //
+  // The placeholder marker is built at runtime via String.fromCharCode
+  // rather than written as a literal escape in this source, so this .py
+  // file never has to carry a raw control byte itself.
+  const LK_MARK = String.fromCharCode(0);
+  const links = [];
+  const pushLink = (text, href) => {
+    const idx = links.length;
+    links.push(
+      '<a href="' + escapeAttr(href) + '" target="_blank" rel="noopener noreferrer">' + text + "</a>"
+    );
+    return LK_MARK + "LK" + idx + LK_MARK;
+  };
+  html = html.replace(
+    /\[([^\]]*)\]\(((?:https?:\/\/|mailto:)[^)\s]+)\)/g,
+    (_, text, href) => pushLink(text || href, href)
+  );
+  html = html.replace(/\bhttps?:\/\/[^\s<]+/g, (url) => {
+    // Trailing punctuation is more often sentence punctuation than part
+    // of the URL (e.g. "see https://x.com." at the end of a sentence).
+    const m = url.match(/^(.*?)([.,;:!?)\]]*)$/);
+    const clean = m[1];
+    const trail = m[2];
+    return clean ? pushLink(clean, clean) + trail : url;
+  });
+
   html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
   html = html.replace(
@@ -458,6 +500,7 @@ function renderMarkdown(text) {
   });
   html = html.replace(/\n/g, "<br>");
   html = html.replace(/ CB(\d+) /g, (_, i) => codeBlocks[Number(i)]);
+  html = html.replace(new RegExp(LK_MARK + "LK(\\d+)" + LK_MARK, "g"), (_, i) => links[Number(i)]);
   return html;
 }
 
