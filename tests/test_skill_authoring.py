@@ -45,6 +45,67 @@ def _propose(provider, tmp_path, monkeypatch, answer, filename="greet.py", code=
     return result, agent
 
 
+def test_require_confirmation_false_auto_approves_a_safe_verdict(tmp_path, monkeypatch):
+    provider = ScriptedProvider([ProviderResponse(text="VERDICT: SAFE\nlooks fine.", tool_calls=[])])
+    agent = FakeAgent()
+    tool = make_propose_skill_tool(provider, str(tmp_path), agent, require_confirmation=False)
+
+    def boom(prompt=""):
+        raise AssertionError("input() must not be called when require_confirmation is False")
+
+    monkeypatch.setattr("builtins.input", boom)
+
+    result = tool.handler(filename="greet.py", code=VALID_CODE, description="greets the user")
+
+    assert "Skill saved" in result
+    assert [t.name for t in agent.added] == ["greet"]
+
+
+def test_require_confirmation_false_auto_approves_a_risky_verdict_too(tmp_path, monkeypatch):
+    # Mega Extreme mode is deliberately this permissive — it skips the
+    # harder RISKY gate as well, not just the plain SAFE one.
+    provider = ScriptedProvider([ProviderResponse(text="VERDICT: RISKY\ndeletes files.", tool_calls=[])])
+    agent = FakeAgent()
+    tool = make_propose_skill_tool(provider, str(tmp_path), agent, require_confirmation=False)
+
+    def boom(prompt=""):
+        raise AssertionError("input() must not be called when require_confirmation is False")
+
+    monkeypatch.setattr("builtins.input", boom)
+
+    result = tool.handler(filename="greet.py", code=VALID_CODE, description="greets the user")
+
+    assert "Skill saved" in result
+    assert [t.name for t in agent.added] == ["greet"]
+
+
+def test_require_confirmation_accepts_a_live_callable(tmp_path, monkeypatch):
+    # Same live-callable pattern as code_exec.py's Confirmation — a plain
+    # bool captured at tool-build time wouldn't see a later mode switch.
+    flag = {"require": True}
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(text="VERDICT: SAFE\nfine.", tool_calls=[]),
+            ProviderResponse(text="VERDICT: SAFE\nfine.", tool_calls=[]),
+        ]
+    )
+    agent = FakeAgent()
+    tool = make_propose_skill_tool(
+        provider, str(tmp_path), agent, require_confirmation=lambda: flag["require"]
+    )
+
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    declined = tool.handler(filename="greet.py", code=VALID_CODE, description="d")
+    assert "declined" in declined
+
+    flag["require"] = False
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt="": (_ for _ in ()).throw(AssertionError("must not prompt"))
+    )
+    approved = tool.handler(filename="greet.py", code=VALID_CODE, description="d")
+    assert "Skill saved" in approved
+
+
 def test_rejects_filename_with_path_separator(tmp_path, monkeypatch):
     provider = ScriptedProvider([])  # must not even be called
 

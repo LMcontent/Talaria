@@ -11,9 +11,13 @@ import os
 
 from talaria.providers.base import Provider, ToolSpec, is_tool_list
 from talaria.security_review import review_code
+from talaria.tools.confirmation import Confirmation
+from talaria.tools.confirmation import wants_confirmation as _wants_confirmation
 
 
-def make_propose_skill_tool(provider: Provider, skills_dir: str, agent, usage=None) -> ToolSpec:
+def make_propose_skill_tool(
+    provider: Provider, skills_dir: str, agent, usage=None, require_confirmation: Confirmation = True
+) -> ToolSpec:
     def propose_skill(filename: str, code: str, description: str) -> str:
         if filename != os.path.basename(filename) or not filename.endswith(".py"):
             return "Error: filename must be a plain 'name.py' with no path separators."
@@ -36,7 +40,15 @@ def make_propose_skill_tool(provider: Provider, skills_dir: str, agent, usage=No
         # review prompt — is treated as risky and needs the harder gate below.
         is_risky = not verdict.strip().upper().startswith("VERDICT: SAFE")
 
-        if is_risky:
+        if not _wants_confirmation(require_confirmation):
+            # Mega Extreme mode only (see talaria/web.py) — deliberately
+            # covers a RISKY verdict too, not just SAFE: the whole point of
+            # that mode is skipping every gate, this one included. Still
+            # printed to the terminal either way, so there's a record of
+            # what got auto-approved and why.
+            print(f"[mega extreme] auto-approved without confirmation ({'RISKY' if is_risky else 'SAFE'} verdict).")
+            approved = True
+        elif is_risky:
             answer = input(
                 "\nThe security review flagged this RISKY (or the review "
                 "itself failed) — see above. This code would run with your "

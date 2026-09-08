@@ -113,21 +113,22 @@ INDEX_HTML = r"""<!doctype html>
   }
   #open-workspace-btn { margin-top: 8px; }
 
-  .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  #mode-label { font-size: 19.5px; font-weight: 600; }
-  #mode-label.danger { color: #a4231d; }
-  .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
-  .switch input { opacity: 0; width: 0; height: 0; }
-  .switch-slider {
-    position: absolute; inset: 0; background: #ccc; border-radius: 22px;
-    cursor: pointer; transition: background 0.15s;
+  /* Safe / Extreme / Mega Extreme: a 3-way escalation, not just an on/off
+     switch — each step removes another confirmation gate (see the README's
+     "Streaming and code execution" section), so the active color escalates
+     too (blue -> amber -> red) as a constant visual reminder of which one
+     is live. */
+  .mode-group {
+    display: flex; border-radius: 8px; overflow: hidden; border: 1px solid #ccc;
   }
-  .switch-slider::before {
-    content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
-    background: #fff; border-radius: 50%; transition: transform 0.15s;
+  .mode-btn {
+    flex: 1; padding: 6px 2px; border: none; border-right: 1px solid #ccc;
+    background: #fff; color: #555; cursor: pointer; font-size: 14.5px; font-weight: 600;
   }
-  .switch input:checked + .switch-slider { background: #a4231d; }
-  .switch input:checked + .switch-slider::before { transform: translateX(18px); }
+  .mode-btn:last-child { border-right: none; }
+  .mode-btn[data-mode="safe"].active { background: #2b6cb0; color: #fff; }
+  .mode-btn[data-mode="extreme"].active { background: #b45309; color: #fff; }
+  .mode-btn[data-mode="mega"].active { background: #a4231d; color: #fff; }
   #mode-desc { margin-top: 6px; font-size: 16.5px; line-height: 1.4; color: #777; }
 
   .tool-item, .log-item { padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 18px; }
@@ -261,7 +262,8 @@ INDEX_HTML = r"""<!doctype html>
     .tool-item, .log-item { border-color: #2c2d31; }
     .tool-item .tdesc, .log-item .tdesc { color: #999; }
     #mode-desc { color: #999; }
-    .switch-slider { background: #444; }
+    .mode-group { border-color: #444; }
+    .mode-btn { background: #24262c; color: #ccc; border-color: #444; }
     .log-item .tname { color: #999; }
     .sidebar-section-title a:hover { color: #5a9fd4; }
     #usage-box { color: #aaa; }
@@ -300,12 +302,10 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">Settings</div>
-    <div class="setting-row">
-      <span id="mode-label">Safe mode</span>
-      <label class="switch" title="Confirmations for run_python / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.">
-        <input type="checkbox" id="mode-toggle">
-        <span class="switch-slider"></span>
-      </label>
+    <div class="mode-group" title="Confirmations for run_python / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.">
+      <button type="button" class="mode-btn" data-mode="safe">Safe</button>
+      <button type="button" class="mode-btn" data-mode="extreme">Extreme</button>
+      <button type="button" class="mode-btn" data-mode="mega">Mega Extreme</button>
     </div>
     <div id="mode-desc" class="tdesc">run_python / install_package ask for confirmation in the terminal.</div>
   </div>
@@ -361,8 +361,7 @@ const cronList = document.getElementById("cron-list");
 const cronRefresh = document.getElementById("cron-refresh");
 const sidebar = document.getElementById("sidebar");
 const sidebarResizer = document.getElementById("sidebar-resizer");
-const modeToggle = document.getElementById("mode-toggle");
-const modeLabel = document.getElementById("mode-label");
+const modeBtns = Array.from(document.querySelectorAll(".mode-btn"));
 const modeDesc = document.getElementById("mode-desc");
 
 function escapeHtml(s) {
@@ -978,42 +977,65 @@ cronRefresh.addEventListener("click", (e) => {
   loadCronJobs();
 });
 
-function applyMode(safe) {
-  modeToggle.checked = !safe;
-  modeLabel.textContent = safe ? "Safe mode" : "Extreme mode";
-  modeLabel.classList.toggle("danger", !safe);
-  modeDesc.textContent = safe
-    ? "run_python / install_package ask for confirmation in the terminal."
-    : "run_python / install_package execute immediately — no confirmation prompt.";
+const MODE_DESCRIPTIONS = {
+  safe: "run_python / install_package ask for confirmation in the terminal.",
+  extreme: "run_python / install_package execute immediately — no confirmation prompt.",
+  mega: "run_python / install_package / propose_skill all execute immediately — " +
+    "no confirmation prompt, even for a skill the security review flagged risky.",
+};
+
+// Escalating one-time warnings — only shown going *up* a level (safe →
+// extreme, extreme → mega, or a direct safe → mega jump shows both in
+// sequence); dropping back down needs no confirmation.
+const MODE_WARNINGS = {
+  extreme: "Extreme mode runs model-generated code with NO confirmation prompt, " +
+    "with your OS-level permissions. Are you sure?",
+  mega: "Mega Extreme mode ALSO lets the agent save and load a brand-new tool for " +
+    "itself with NO confirmation — even one the automatic security review flagged " +
+    "RISKY. That tool then runs with your OS-level permissions every time the agent " +
+    "calls it, forever, with no further confirmation. Are you sure?",
+};
+const MODE_ORDER = ["safe", "extreme", "mega"];
+
+function applyMode(mode) {
+  for (const btn of modeBtns) {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  }
+  modeDesc.textContent = MODE_DESCRIPTIONS[mode] || "";
 }
 
 async function loadSettings() {
   const res = await fetch("/api/settings");
   const data = await res.json();
-  applyMode(data.safe_mode);
+  applyMode(data.mode);
 }
 loadSettings();
 
-modeToggle.addEventListener("change", async () => {
-  const wantSafe = !modeToggle.checked;
-  if (!wantSafe) {
-    const ok = confirm(
-      "Extreme mode runs model-generated code with NO confirmation prompt, " +
-      "with your OS-level permissions. Are you sure?"
-    );
-    if (!ok) {
-      modeToggle.checked = true;
-      return;
+for (const btn of modeBtns) {
+  btn.addEventListener("click", async () => {
+    const current = modeBtns.find((b) => b.classList.contains("active"));
+    const from = current ? current.dataset.mode : "safe";
+    const to = btn.dataset.mode;
+    if (to === from) return;
+
+    // Confirm every warning level strictly between `from` and `to` (in
+    // order), not just the destination — a direct safe -> mega jump must
+    // not skip the extreme warning on the way past it.
+    for (const level of MODE_ORDER.slice(MODE_ORDER.indexOf(from) + 1, MODE_ORDER.indexOf(to) + 1)) {
+      if (MODE_WARNINGS[level] && !confirm(MODE_WARNINGS[level])) {
+        return;
+      }
     }
-  }
-  const res = await fetch("/api/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ safe_mode: wantSafe }),
+
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: to }),
+    });
+    const data = await res.json();
+    applyMode(data.mode);
   });
-  const data = await res.json();
-  applyMode(data.safe_mode);
-});
+}
 
 async function loadTools() {
   const res = await fetch("/api/tools");
@@ -1083,19 +1105,30 @@ def create_app(config: Config) -> Flask:
         "role": config.default_role if config.default_role in ROLES else DEFAULT_ROLE,
         "history": compact_history(load_history(config.memory_file), config.max_history_turns),
         "cancel_event": None,
-        # Safe mode (default, from .env) asks for a y/N confirmation in the
-        # terminal before run_python/install_package execute. Extreme mode
-        # skips that prompt entirely. A callable (not the bool itself) is
-        # handed to build_tools so flipping this via the sidebar toggle
-        # takes effect on the next tool call, with no rebuild/restart.
-        "safe_mode": config.confirm_code_exec,
+        # Safe (default, from .env): run_python/install_package ask for a
+        # y/N confirmation in the terminal. Extreme: that prompt is
+        # skipped. Mega Extreme: propose_skill's own separate confirmation
+        # (including its harder RISKY-verdict gate) is skipped too — that
+        # one was never tied to Safe/Extreme, since permanently adding a
+        # new capability is a bigger decision than one run_python call.
+        # Callables (not the mode string itself) are handed to build_tools
+        # / make_propose_skill_tool so flipping this via the sidebar takes
+        # effect on the next tool call, with no rebuild/restart.
+        "mode": "safe" if config.confirm_code_exec else "extreme",
     }
-    tools = build_tools(config, provider, usage=usage, confirm_code_exec=lambda: state["safe_mode"])
+    tools = build_tools(
+        config, provider, usage=usage, confirm_code_exec=lambda: state["mode"] == "safe"
+    )
     agent = Agent(
         provider, tools, system=build_system(state["role"], config.notes_file),
         max_turns=config.max_turns, usage=usage,
     )
-    agent.add_tools([make_propose_skill_tool(provider, config.skills_dir, agent, usage=usage)])
+    agent.add_tools([
+        make_propose_skill_tool(
+            provider, config.skills_dir, agent, usage=usage,
+            require_confirmation=lambda: state["mode"] != "mega",
+        )
+    ])
     # Runs jobs scheduled via cron_add for as long as this process stays up
     # — see talaria/cron_scheduler.py for why that's an acceptable
     # limitation at this stage.
@@ -1333,9 +1366,12 @@ def create_app(config: Config) -> Flask:
     def settings_endpoint():
         if request.method == "POST":
             data = request.get_json(force=True) or {}
-            if "safe_mode" in data:
-                state["safe_mode"] = bool(data["safe_mode"])
-        return jsonify({"safe_mode": state["safe_mode"]})
+            mode = data.get("mode")
+            if mode is not None:
+                if mode not in ("safe", "extreme", "mega"):
+                    return jsonify({"error": f"unknown mode {mode!r}"}), 400
+                state["mode"] = mode
+        return jsonify({"mode": state["mode"]})
 
     @app.route("/api/tools")
     def tools_endpoint():

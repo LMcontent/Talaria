@@ -1,24 +1,14 @@
 import os
 import subprocess
 import tempfile
-from typing import Callable, Union
 
 from talaria.providers.base import ToolSpec
 from talaria.sandbox import ensure_sandbox
+from talaria.tools.confirmation import Confirmation, wants_confirmation as _wants_confirmation
 
 _TIMEOUT = 15
 _INSTALL_TIMEOUT = 300
 _MAX_CHARS = 4000
-
-# Either a fixed bool (CLI/autonomous — set once at startup from .env) or a
-# zero-arg callable resolved on every call (the web UI's Safe/Extreme mode
-# toggle — reading a bool wouldn't see a change made after the tool was
-# built, since Python closures capture the value, not a live reference).
-Confirmation = Union[bool, Callable[[], bool]]
-
-
-def _wants_confirmation(require_confirmation: Confirmation) -> bool:
-    return require_confirmation() if callable(require_confirmation) else require_confirmation
 
 
 def run_python(workspace_dir: str, code: str, require_confirmation: Confirmation = True) -> str:
