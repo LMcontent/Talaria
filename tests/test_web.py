@@ -243,11 +243,18 @@ def test_settings_get_and_post(app_factory):
     client, _, _ = app_factory([])
 
     current = client.get("/api/settings").get_json()
-    assert current["safe_mode"] is False  # make_config's confirm_code_exec=False
+    assert current["mode"] == "extreme"  # make_config's confirm_code_exec=False
 
-    switched = client.post("/api/settings", json={"safe_mode": True})
-    assert switched.get_json()["safe_mode"] is True
-    assert client.get("/api/settings").get_json()["safe_mode"] is True
+    switched = client.post("/api/settings", json={"mode": "safe"})
+    assert switched.get_json()["mode"] == "safe"
+    assert client.get("/api/settings").get_json()["mode"] == "safe"
+
+
+def test_settings_post_rejects_unknown_mode(app_factory):
+    client, _, _ = app_factory([])
+    resp = client.post("/api/settings", json={"mode": "nonsense"})
+    assert resp.status_code == 400
+    assert client.get("/api/settings").get_json()["mode"] == "extreme"
 
 
 def test_settings_toggle_controls_run_python_confirmation_prompt(app_factory, monkeypatch):
@@ -279,9 +286,43 @@ def test_settings_toggle_controls_run_python_confirmation_prompt(app_factory, mo
 
     # Flip to safe mode via the sidebar toggle's endpoint — the *next*
     # run_python call must now prompt, with no app rebuild in between.
-    client.post("/api/settings", json={"safe_mode": True})
+    client.post("/api/settings", json={"mode": "safe"})
     client.post("/api/chat", json={"message": "run some code again"})
     assert prompted == [True]
+
+
+def test_mega_extreme_mode_skips_propose_skill_confirmation(app_factory, monkeypatch):
+    from talaria.providers.base import ToolCall
+
+    boom = lambda prompt="": (_ for _ in ()).throw(AssertionError("input() must not be called in mega mode"))
+    monkeypatch.setattr("builtins.input", boom)
+
+    code = (
+        "from talaria.providers.base import ToolSpec\n"
+        "TOOLS = [ToolSpec(name='greet', description='d', "
+        "input_schema={'type': 'object', 'properties': {}}, handler=lambda: 'hi')]\n"
+    )
+    client, _, _ = app_factory(
+        [
+            ProviderResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(
+                        id="1", name="propose_skill",
+                        input={"filename": "greet.py", "code": code, "description": "greets"},
+                    )
+                ],
+            ),
+            ProviderResponse(text="VERDICT: SAFE\nfine.", tool_calls=[]),  # security review call
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+
+    client.post("/api/settings", json={"mode": "mega"})
+    resp = client.post("/api/chat", json={"message": "add a greet skill"})
+
+    assert resp.status_code == 200
+    assert "greet" in [t["name"] for t in client.get("/api/tools").get_json()["tools"]]
 
 
 def test_tools_endpoint_lists_builtin_tools(app_factory):

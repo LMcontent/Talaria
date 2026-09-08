@@ -329,14 +329,25 @@ running any code the model generated — the code runs with your OS-level
 permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
 in `.env` to skip the prompt (only if you fully trust the model/provider).
 
-In the web UI, the sidebar's **Settings → Safe mode** toggle overrides
-`CONFIRM_CODE_EXEC` live for the running session — flip it to Extreme mode
-to have `run_python`/`install_package` execute immediately with no
-confirmation prompt, or back to Safe mode to restore the prompt. It asks
-for a confirmation of its own before switching to Extreme mode, and takes
-effect on the very next tool call with no restart needed. The prompt
-itself still only ever appears in the terminal running the server, never
-in the browser.
+In the web UI, the sidebar's **Settings** control is a three-way
+Safe / Extreme / Mega Extreme switch, overriding `CONFIRM_CODE_EXEC` live
+for the running session (no restart needed, takes effect on the very next
+tool call):
+
+- **Safe** (default): `run_python`/`install_package` ask for `y/N`
+  confirmation, same as the CLI.
+- **Extreme**: those two execute immediately, no prompt.
+- **Mega Extreme**: Extreme, plus `propose_skill` also saves and loads a
+  new skill with no confirmation — including one the automatic security
+  review flagged **RISKY**. `propose_skill`'s confirmation is otherwise a
+  separate, always-on gate independent of Safe/Extreme (see below);
+  Mega Extreme is the only thing that also covers it.
+
+Switching to a more permissive level than the current one shows a
+confirm() warning first (a direct Safe → Mega Extreme jump shows both the
+Extreme and the Mega Extreme warning, in order); dropping back down to a
+safer level needs no confirmation. Every prompt these skip still only
+ever appears in the terminal running the server, never in the browser.
 
 ### Thinking and tool-call visibility in the web UI
 
@@ -519,6 +530,14 @@ path separators allowed), or code that fails to import all fail safely
 without touching the skills directory. This tool is only ever given to
 the top-level agent — a `delegate_task` sub-agent can't call it, so new
 tools can't be added without you seeing it happen.
+
+This confirmation is independent of the CLI's `CONFIRM_CODE_EXEC` and the
+web UI's Safe/Extreme mode (both scoped to `run_python`/`install_package`
+only) — it always asks, in either mode, since permanently adding a new
+capability the agent can call forever is a bigger decision than one
+`run_python` call. The one exception is the web UI's **Mega Extreme**
+mode (see "Streaming and code execution" above), which skips this gate
+too, including its RISKY-verdict branch.
 
 ### Tools available to the agent
 
