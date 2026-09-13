@@ -78,8 +78,8 @@ def test_on_event_fires_tool_call_then_tool_result_in_order():
     agent.run("go", on_event=lambda etype, data: events.append((etype, data)))
 
     assert events == [
-        ("tool_call", {"name": "echo", "input": {"x": "hi"}}),
-        ("tool_result", {"name": "echo", "result": "echo:hi"}),
+        ("tool_call", {"id": "1", "name": "echo", "input": {"x": "hi"}}),
+        ("tool_result", {"id": "1", "name": "echo", "result": "echo:hi"}),
     ]
 
 
@@ -99,9 +99,119 @@ def test_on_event_fires_tool_result_with_error_message_on_a_failing_tool():
 
     agent.run("go", on_event=lambda etype, data: events.append((etype, data)))
 
-    assert events[0] == ("tool_call", {"name": "boom", "input": {}})
+    assert events[0] == ("tool_call", {"id": "1", "name": "boom", "input": {}})
     assert events[1][0] == "tool_result"
+    assert events[1][1]["id"] == "1"
     assert "kaboom" in events[1][1]["result"]
+
+
+def test_multiple_tool_calls_in_one_turn_run_concurrently():
+    # Two tools that each sleep 0.2s: run one at a time that's >= 0.4s,
+    # run concurrently it's close to 0.2s — the actual point of
+    # parallelizing a turn's tool calls instead of running them in a loop.
+    import time
+
+    def make_slow_tool(name, delay):
+        return ToolSpec(
+            name=name, description="d", input_schema={"type": "object", "properties": {}},
+            handler=lambda: (time.sleep(delay), f"{name} done")[1],
+        )
+
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(id="1", name="slow_a", input={}),
+                    ToolCall(id="2", name="slow_b", input={}),
+                ],
+            ),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(
+        provider, tools=[make_slow_tool("slow_a", 0.2), make_slow_tool("slow_b", 0.2)], system="sys"
+    )
+
+    start = time.monotonic()
+    agent.run("go")
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.35, f"took {elapsed:.2f}s — tool calls do not appear to run concurrently"
+
+
+def test_parallel_tool_results_are_matched_by_id_not_completion_order():
+    # slow_a finishes *after* fast_b despite being requested first — the
+    # result each gets in history must still be its own, matched by id,
+    # not whichever happened to land in the queue first.
+    import time
+
+    def make_tool(name, delay, text):
+        return ToolSpec(
+            name=name, description="d", input_schema={"type": "object", "properties": {}},
+            handler=lambda: (time.sleep(delay), text)[1],
+        )
+
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(id="1", name="slow_a", input={}),
+                    ToolCall(id="2", name="fast_b", input={}),
+                ],
+            ),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(
+        provider,
+        tools=[make_tool("slow_a", 0.2, "result A"), make_tool("fast_b", 0.0, "result B")],
+        system="sys",
+    )
+    history: list[dict] = []
+
+    agent.run("go", history=history)
+
+    tool_entries = [e for e in history if e["role"] == "tool"]
+    assert tool_entries[0]["tool_call_id"] == "1"
+    assert tool_entries[0]["content"] == "result A"
+    assert tool_entries[1]["tool_call_id"] == "2"
+    assert tool_entries[1]["content"] == "result B"
+
+
+def test_all_tool_calls_are_announced_before_any_result_arrives():
+    # The web UI shows every pending call immediately (see
+    # _run_tool_calls's docstring) — both tool_call events must fire
+    # before either tool_result does, even though the tools themselves
+    # run concurrently and could finish in either order.
+    import time
+
+    def make_tool(name, delay):
+        return ToolSpec(
+            name=name, description="d", input_schema={"type": "object", "properties": {}},
+            handler=lambda: (time.sleep(delay), "ok")[1],
+        )
+
+    provider = ScriptedProvider(
+        [
+            ProviderResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(id="1", name="a", input={}),
+                    ToolCall(id="2", name="b", input={}),
+                ],
+            ),
+            ProviderResponse(text="done", tool_calls=[]),
+        ]
+    )
+    agent = Agent(provider, tools=[make_tool("a", 0.1), make_tool("b", 0.1)], system="sys")
+    events: list[tuple] = []
+
+    agent.run("go", on_event=lambda etype, data: events.append((etype, data)))
+
+    event_types = [e[0] for e in events]
+    assert event_types == ["tool_call", "tool_call", "tool_result", "tool_result"]
 
 
 def test_on_event_is_passed_through_to_the_provider():

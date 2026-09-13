@@ -16,6 +16,7 @@ from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.system_prompt import build_system
 from talaria.tools.cron import cron_matches, load_jobs, save_jobs
 from talaria.tools.registry import build_tools
+from talaria.tools.state_lock import STATE_LOCK
 from talaria.usage import UsageTracker
 from talaria.workspace_log import append_log
 
@@ -28,12 +29,28 @@ EXCLUDED_TOOLS = {"run_python", "install_package", "propose_skill", "delegate_ta
 _CHECK_INTERVAL_SECONDS = 30
 _LOG_FILENAME = ".cron_log.json"
 
+# Set while _run_job is actually running a job, cleared right after —
+# lets the web UI's sidebar show "job #N is running right now" (see
+# get_active_job / /api/activity in talaria/web.py) instead of only ever
+# showing completed runs via the cron log. Guarded by its own lock since
+# the web request thread reads it while this background thread may be
+# writing it.
+_active_lock = threading.Lock()
+_active_job: dict | None = None
+
+
+def get_active_job() -> dict | None:
+    with _active_lock:
+        return dict(_active_job) if _active_job else None
+
 
 def build_cron_tools(config: Config, provider: Provider) -> list[ToolSpec]:
     return [t for t in build_tools(config, provider) if t.name not in EXCLUDED_TOOLS]
 
 
 def _run_job(config: Config, provider: Provider, usage: UsageTracker, job: dict) -> None:
+    global _active_job
+
     role = config.default_role if config.default_role in ROLES else DEFAULT_ROLE
     tools = build_cron_tools(config, provider)
     agent = Agent(
@@ -42,10 +59,20 @@ def _run_job(config: Config, provider: Provider, usage: UsageTracker, job: dict)
     )
     label = job.get("name") or job["schedule"]
     print(f"\n[cron] running job #{job['id']} ({label})")
+    with _active_lock:
+        _active_job = {
+            "id": job["id"],
+            "name": job.get("name", ""),
+            "schedule": job["schedule"],
+            "started": datetime.now(timezone.utc).isoformat(),
+        }
     try:
         reply = agent.run(job["prompt"])
     except Exception as e:
         reply = f"Error: {e}"
+    finally:
+        with _active_lock:
+            _active_job = None
     print()
 
     append_log(config.workspace_dir, _LOG_FILENAME, {
@@ -60,23 +87,28 @@ def _run_job(config: Config, provider: Provider, usage: UsageTracker, job: dict)
 def _tick(config: Config, provider: Provider, usage: UsageTracker, now: datetime | None = None) -> None:
     now = (now or datetime.now(timezone.utc)).replace(second=0, microsecond=0)
     minute_key = now.isoformat()
-    jobs = load_jobs(config.workspace_dir)
-    if not jobs:
-        return
+    # This background thread's own load-mutate-save of .cron.json races
+    # the exact same file cron_add/cron_remove/cron_toggle touch from a
+    # tool call — same lock, so a job added/edited mid-tick can't be lost
+    # or torn.
+    with STATE_LOCK:
+        jobs = load_jobs(config.workspace_dir)
+        if not jobs:
+            return
 
-    due = [
-        j for j in jobs
-        if j.get("enabled", True)
-        and j.get("last_fired_minute") != minute_key
-        and cron_matches(j["schedule"], now)
-    ]
-    if not due:
-        return
+        due = [
+            j for j in jobs
+            if j.get("enabled", True)
+            and j.get("last_fired_minute") != minute_key
+            and cron_matches(j["schedule"], now)
+        ]
+        if not due:
+            return
 
-    for job in due:
-        job["last_fired_minute"] = minute_key
-        job["last_run"] = minute_key
-    save_jobs(config.workspace_dir, jobs)
+        for job in due:
+            job["last_fired_minute"] = minute_key
+            job["last_run"] = minute_key
+        save_jobs(config.workspace_dir, jobs)
 
     # Run after saving, so a job that raises (or a process crash mid-run)
     # can't cause the same minute to fire it twice.

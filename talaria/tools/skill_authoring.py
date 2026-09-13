@@ -11,7 +11,7 @@ import os
 
 from talaria.providers.base import Provider, ToolSpec, is_tool_list
 from talaria.security_review import review_code
-from talaria.tools.confirmation import Confirmation
+from talaria.tools.confirmation import CONFIRMATION_LOCK, Confirmation
 from talaria.tools.confirmation import wants_confirmation as _wants_confirmation
 
 
@@ -49,20 +49,22 @@ def make_propose_skill_tool(
             print(f"[mega extreme] auto-approved without confirmation ({'RISKY' if is_risky else 'SAFE'} verdict).")
             approved = True
         elif is_risky:
-            answer = input(
-                "\nThe security review flagged this RISKY (or the review "
-                "itself failed) — see above. This code would run with your "
-                "OS-level permissions every time the agent calls it, with NO "
-                "further confirmation after today. To proceed anyway, type "
-                "exactly: yes, I understand the risk\n> "
-            ).strip().lower()
+            with CONFIRMATION_LOCK:
+                answer = input(
+                    "\nThe security review flagged this RISKY (or the review "
+                    "itself failed) — see above. This code would run with your "
+                    "OS-level permissions every time the agent calls it, with NO "
+                    "further confirmation after today. To proceed anyway, type "
+                    "exactly: yes, I understand the risk\n> "
+                ).strip().lower()
             approved = answer == "yes, i understand the risk"
         else:
-            answer = input(
-                "\nThis code will run with your OS-level permissions every time "
-                "the agent calls this tool, with NO further confirmation after "
-                "today. Save and load this skill? [y/N]: "
-            ).strip().lower()
+            with CONFIRMATION_LOCK:
+                answer = input(
+                    "\nThis code will run with your OS-level permissions every time "
+                    "the agent calls this tool, with NO further confirmation after "
+                    "today. Save and load this skill? [y/N]: "
+                ).strip().lower()
             approved = answer in ("y", "yes", "д", "да")
 
         if not approved:

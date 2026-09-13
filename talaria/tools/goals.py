@@ -12,6 +12,7 @@ import os
 from datetime import datetime, timezone
 
 from talaria.providers.base import ToolSpec
+from talaria.tools.state_lock import STATE_LOCK
 
 _PRIORITIES = {"low": 1, "medium": 2, "high": 3}
 _STATUSES = {"active", "paused", "done", "dropped"}
@@ -59,28 +60,33 @@ def goal_add(workspace_dir: str, title: str = "", parent_id: str = "", priority:
     if pr not in _PRIORITIES:
         return "Error: priority must be one of low/medium/high."
 
-    goals = _load(workspace_dir)
-    parent = None
-    if str(parent_id).strip():
-        try:
-            parent = int(str(parent_id).strip())
-        except ValueError:
-            return "Error: parent_id must be a numeric goal id."
-        if _find(goals, parent) is None:
-            return f"Error: no goal #{parent} to attach to (see goal_list)."
+    with STATE_LOCK:
+        goals = _load(workspace_dir)
+        parent = None
+        if str(parent_id).strip():
+            try:
+                parent = int(str(parent_id).strip())
+            except ValueError:
+                return "Error: parent_id must be a numeric goal id."
+            if _find(goals, parent) is None:
+                return f"Error: no goal #{parent} to attach to (see goal_list)."
 
-    gid = max([g["id"] for g in goals], default=0) + 1
-    goals.append({
-        "id": gid,
-        "title": t,
-        "parent_id": parent,
-        "priority": pr,
-        "status": "active",
-        "created": _now(),
-        "updated": _now(),
-        "notes": [],
-    })
-    _save(workspace_dir, goals)
+        # gid computed and the new goal saved inside the same lock —
+        # otherwise two concurrent goal_add calls (tool calls now run in
+        # parallel, see talaria/agent.py) could both compute the same
+        # next id from the same stale read.
+        gid = max([g["id"] for g in goals], default=0) + 1
+        goals.append({
+            "id": gid,
+            "title": t,
+            "parent_id": parent,
+            "priority": pr,
+            "status": "active",
+            "created": _now(),
+            "updated": _now(),
+            "notes": [],
+        })
+        _save(workspace_dir, goals)
     under = f" under #{parent}" if parent is not None else ""
     return f"Added goal #{gid} '{t}' ({pr}){under}."
 
@@ -93,28 +99,29 @@ def goal_update(
         gid = int(str(id).strip())
     except ValueError:
         return "Error: id must be a numeric goal id."
-    goals = _load(workspace_dir)
-    g = _find(goals, gid)
-    if g is None:
-        return f"Error: no goal #{gid} (see goal_list)."
+    with STATE_LOCK:
+        goals = _load(workspace_dir)
+        g = _find(goals, gid)
+        if g is None:
+            return f"Error: no goal #{gid} (see goal_list)."
 
-    st = str(status).strip().lower()
-    pr = str(priority).strip().lower()
-    nt = str(note).strip()
-    if not st and not pr and not nt:
-        return "Error: give at least one of status, priority or note to update."
-    if st:
-        if st not in _STATUSES:
-            return "Error: status must be one of active/paused/done/dropped."
-        g["status"] = st
-    if pr:
-        if pr not in _PRIORITIES:
-            return "Error: priority must be one of low/medium/high."
-        g["priority"] = pr
-    if nt:
-        g.setdefault("notes", []).append({"ts": _now(), "text": nt})
-    g["updated"] = _now()
-    _save(workspace_dir, goals)
+        st = str(status).strip().lower()
+        pr = str(priority).strip().lower()
+        nt = str(note).strip()
+        if not st and not pr and not nt:
+            return "Error: give at least one of status, priority or note to update."
+        if st:
+            if st not in _STATUSES:
+                return "Error: status must be one of active/paused/done/dropped."
+            g["status"] = st
+        if pr:
+            if pr not in _PRIORITIES:
+                return "Error: priority must be one of low/medium/high."
+            g["priority"] = pr
+        if nt:
+            g.setdefault("notes", []).append({"ts": _now(), "text": nt})
+        g["updated"] = _now()
+        _save(workspace_dir, goals)
 
     changes = ", ".join(
         p for p in [f"status={st}" if st else "", f"priority={pr}" if pr else "", "note added" if nt else ""] if p

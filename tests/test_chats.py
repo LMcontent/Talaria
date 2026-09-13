@@ -7,6 +7,7 @@ from talaria.chats import (
     history_path,
     list_chats,
     rename_chat,
+    set_chat_role,
     touch_chat,
 )
 
@@ -28,6 +29,28 @@ def test_create_chat_returns_and_persists_an_entry(tmp_path):
 def test_create_chat_defaults_to_new_chat_title(tmp_path):
     chat = create_chat(str(tmp_path))
     assert chat["title"] == "New chat"
+
+
+def test_create_chat_stores_its_own_role(tmp_path):
+    chat = create_chat(str(tmp_path), role="researcher")
+    assert chat["role"] == "researcher"
+    assert list_chats(str(tmp_path))[0]["role"] == "researcher"
+
+
+def test_set_chat_role_updates_it_without_bumping_updated(tmp_path):
+    chat = create_chat(str(tmp_path), role="assistant")
+    before = list_chats(str(tmp_path))[0]["updated"]
+
+    ok = set_chat_role(str(tmp_path), chat["id"], "coder")
+
+    assert ok is True
+    entry = list_chats(str(tmp_path))[0]
+    assert entry["role"] == "coder"
+    assert entry["updated"] == before
+
+
+def test_set_chat_role_unknown_chat_returns_false(tmp_path):
+    assert set_chat_role(str(tmp_path), "nonexistent", "coder") is False
 
 
 def test_list_chats_sorted_most_recently_updated_first(tmp_path):

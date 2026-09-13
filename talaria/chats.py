@@ -66,12 +66,30 @@ def list_chats(workspace_dir: str) -> list[dict]:
     return sorted(_load_index(workspace_dir), key=lambda c: c["updated"], reverse=True)
 
 
-def create_chat(workspace_dir: str, title: str = "New chat") -> dict:
+def create_chat(workspace_dir: str, title: str = "New chat", role: str = "assistant") -> dict:
     chats = _load_index(workspace_dir)
-    entry = {"id": uuid.uuid4().hex[:12], "title": title, "created": _now(), "updated": _now()}
+    entry = {
+        "id": uuid.uuid4().hex[:12], "title": title, "role": role,
+        "created": _now(), "updated": _now(),
+    }
     chats.append(entry)
     _save_index(workspace_dir, chats)
     return entry
+
+
+def set_chat_role(workspace_dir: str, chat_id: str, role: str) -> bool:
+    """Each chat remembers its own role (assistant/researcher/coder/...)
+    independently — switching chats switches which one is active, the way
+    switching chats already switches history. Doesn't bump `updated`: a
+    role change isn't conversation activity, so it shouldn't reorder the
+    chat list on its own."""
+    chats = _load_index(workspace_dir)
+    for c in chats:
+        if c["id"] == chat_id:
+            c["role"] = role
+            _save_index(workspace_dir, chats)
+            return True
+    return False
 
 
 def rename_chat(workspace_dir: str, chat_id: str, title: str) -> bool:
