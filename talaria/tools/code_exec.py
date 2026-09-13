@@ -4,7 +4,7 @@ import tempfile
 
 from talaria.providers.base import ToolSpec
 from talaria.sandbox import ensure_sandbox
-from talaria.tools.confirmation import Confirmation, wants_confirmation as _wants_confirmation
+from talaria.tools.confirmation import CONFIRMATION_LOCK, Confirmation, wants_confirmation as _wants_confirmation
 
 _TIMEOUT = 15
 _INSTALL_TIMEOUT = 300
@@ -23,10 +23,11 @@ def run_python(workspace_dir: str, code: str, require_confirmation: Confirmation
     trusted model/provider and be mindful of what you approve.
     """
     if _wants_confirmation(require_confirmation):
-        print("\n--- The model wants to run this Python code (in its sandbox venv): ---")
-        print(code)
-        print("--- end of code ---")
-        answer = input("Allow execution? [y/N]: ").strip().lower()
+        with CONFIRMATION_LOCK:
+            print("\n--- The model wants to run this Python code (in its sandbox venv): ---")
+            print(code)
+            print("--- end of code ---")
+            answer = input("Allow execution? [y/N]: ").strip().lower()
         if answer not in ("y", "yes", "д", "да"):
             return (
                 "Execution declined by the user. Do not attempt to run this "
@@ -76,8 +77,9 @@ def install_package(workspace_dir: str, package: str, require_confirmation: Conf
         return "Error: package must be a non-empty pip requirement, e.g. 'requests' or 'pandas==2.2.0'."
 
     if _wants_confirmation(require_confirmation):
-        print(f"\n--- The model wants to install into its sandbox venv: {package} ---")
-        answer = input("Allow installation? [y/N]: ").strip().lower()
+        with CONFIRMATION_LOCK:
+            print(f"\n--- The model wants to install into its sandbox venv: {package} ---")
+            answer = input("Allow installation? [y/N]: ").strip().lower()
         if answer not in ("y", "yes", "д", "да"):
             return (
                 "Installation declined by the user. Do not attempt to install "

@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timezone
 
 from talaria.config import Config
-from talaria.cron_scheduler import EXCLUDED_TOOLS, build_cron_tools, _tick
+from talaria.cron_scheduler import EXCLUDED_TOOLS, build_cron_tools, get_active_job, _tick
 from talaria.providers.base import ProviderResponse
 from talaria.tools.cron import cron_add, load_jobs
 from talaria.usage import UsageTracker
@@ -145,3 +145,30 @@ def test_tick_is_a_noop_with_no_jobs(tmp_path):
     provider = ScriptedProvider([])
     usage = UsageTracker()
     _tick(config, provider, usage)  # must not raise
+
+
+def test_running_job_is_visible_via_get_active_job_then_cleared(tmp_path):
+    # Regression test for the web UI's "Active now" sidebar section
+    # (/api/activity in talaria/web.py): while a job is actually running,
+    # get_active_job() must report it, and it must be cleared again once
+    # the job finishes.
+    config = make_config(tmp_path)
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    cron_add(config.workspace_dir, "* * * * *", "say hi", name="Every minute")
+
+    captured = {}
+
+    def respond(history, system, tools):
+        captured["active"] = get_active_job()
+        return ProviderResponse(text="hi", tool_calls=[])
+
+    provider = ScriptedProvider([respond])
+    usage = UsageTracker()
+
+    assert get_active_job() is None
+    _tick(config, provider, usage, now=datetime(2024, 1, 1, 9, 0, tzinfo=timezone.utc))
+
+    assert captured["active"] is not None
+    assert captured["active"]["id"] == 1
+    assert captured["active"]["name"] == "Every minute"
+    assert get_active_job() is None

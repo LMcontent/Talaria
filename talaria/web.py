@@ -23,7 +23,7 @@ import talaria.chats as chat_store
 from talaria.agent import Agent
 from talaria.compaction import compact_history
 from talaria.config import Config, load_config
-from talaria.cron_scheduler import start_cron_scheduler
+from talaria.cron_scheduler import get_active_job as get_active_cron_job, start_cron_scheduler
 from talaria.memory import clear_history, load_history, save_history
 from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
@@ -345,6 +345,10 @@ INDEX_HTML = r"""<!doctype html>
     <div class="sidebar-section-title">Usage</div>
     <div id="usage-box">Loading…</div>
   </div>
+  <div class="sidebar-section" id="activity-section" hidden>
+    <div class="sidebar-section-title">Active now</div>
+    <div id="activity-list"></div>
+  </div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">
       Autonomous log
@@ -385,6 +389,8 @@ const resetBtn = document.getElementById("reset-btn");
 const openWorkspaceBtn = document.getElementById("open-workspace-btn");
 const toolsList = document.getElementById("tools-list");
 const usageBox = document.getElementById("usage-box");
+const activitySection = document.getElementById("activity-section");
+const activityList = document.getElementById("activity-list");
 const autonomousLog = document.getElementById("autonomous-log");
 const autonomousLogRefresh = document.getElementById("autonomous-log-refresh");
 const cronList = document.getElementById("cron-list");
@@ -730,7 +736,7 @@ form.addEventListener("submit", async (e) => {
   let thinkBlock = null;
   let thinkBody = null;
   let thinkText = "";
-  const pendingToolBlocks = [];
+  const toolBlocksById = new Map();
   let replyDiv = null;
   let fullText = "";
 
@@ -779,16 +785,18 @@ form.addEventListener("submit", async (e) => {
       block.appendChild(body);
       header.addEventListener("click", () => block.classList.toggle("expanded"));
       turnDiv.appendChild(block);
-      pendingToolBlocks.push({ header, body });
+      toolBlocksById.set(evt.id, { header, body });
     } else if (evt.type === "tool_result") {
-      // Tool calls run one at a time, in the same order their results
-      // arrive in, so pairing by FIFO order (rather than needing the
-      // backend to invent and track an id) is always correct here.
-      const pending = pendingToolBlocks.shift();
+      // Tool calls can now run concurrently (talaria/agent.py), so results
+      // don't necessarily arrive in the same order their calls were
+      // announced in — match by id (added to the on_event payload for
+      // exactly this reason) rather than assuming FIFO order.
+      const pending = toolBlocksById.get(evt.id);
       if (pending) {
         const status = pending.header.querySelector(".tool-status");
         if (status) status.remove();
         pending.body.textContent = evt.result;
+        toolBlocksById.delete(evt.id);
       }
     } else if (evt.type === "chunk") {
       ensureTurnDiv();
@@ -1086,6 +1094,39 @@ autonomousLogRefresh.addEventListener("click", (e) => {
   loadAutonomousLog();
 });
 
+// Polled independently of everything else in the sidebar (cron jobs and
+// autonomous check-ins can start/finish with nobody watching, between any
+// of this page's own requests), so this is the one thing here on its own
+// timer rather than only refreshed on load/click.
+async function loadActivity() {
+  let data;
+  try {
+    const res = await fetch("/api/activity");
+    data = await res.json();
+  } catch {
+    return; // transient fetch failure — just try again next tick
+  }
+  activityList.innerHTML = "";
+  const items = [];
+  if (data.cron) {
+    const label = data.cron.name ? data.cron.name + " — " : "";
+    items.push("Cron #" + data.cron.id + " " + label + data.cron.schedule + " is running");
+  }
+  if (data.autonomous) {
+    const focusLine = (data.autonomous.focus || "").split("\n")[0];
+    items.push("Autonomous check-in in progress" + (focusLine ? " — " + focusLine : ""));
+  }
+  activitySection.hidden = items.length === 0;
+  for (const text of items) {
+    const item = document.createElement("div");
+    item.className = "log-item";
+    item.textContent = text;
+    activityList.appendChild(item);
+  }
+}
+loadActivity();
+setInterval(loadActivity, 3000);
+
 async function loadCronJobs() {
   const res = await fetch("/api/cron");
   const data = await res.json();
@@ -1241,6 +1282,8 @@ def create_app(config: Config) -> Flask:
         input_price_per_m=config.token_price_input_per_m,
         output_price_per_m=config.token_price_output_per_m,
     )
+    default_role = config.default_role if config.default_role in ROLES else DEFAULT_ROLE
+
     # Multiple independent chats (talaria/chats.py), each with its own
     # history file under WORKSPACE_DIR/chats/ — the first run migrates
     # whatever was in the old single MEMORY_FILE into one chat instead of
@@ -1249,15 +1292,24 @@ def create_app(config: Config) -> Flask:
     if not existing_chats:
         legacy_history = load_history(config.memory_file)
         first_chat = chat_store.create_chat(
-            config.workspace_dir, title="Imported chat" if legacy_history else "New chat"
+            config.workspace_dir, title="Imported chat" if legacy_history else "New chat",
+            role=default_role,
         )
         if legacy_history:
             save_history(chat_store.history_path(config.workspace_dir, first_chat["id"]), legacy_history)
         existing_chats = [first_chat]
-    active_chat_id = existing_chats[0]["id"]
+    active_chat = existing_chats[0]
+    active_chat_id = active_chat["id"]
+    active_role = active_chat.get("role")
+    if active_role not in ROLES:
+        active_role = default_role
 
     state = {
-        "role": config.default_role if config.default_role in ROLES else DEFAULT_ROLE,
+        # Each chat remembers its own role (talaria/chats.py) — this is
+        # just which one is currently loaded, kept in sync by _switch_chat
+        # below and by the /api/role handler writing back to the active
+        # chat's own stored role, not a single global setting.
+        "role": active_role,
         "chat_id": active_chat_id,
         "history": compact_history(
             load_history(chat_store.history_path(config.workspace_dir, active_chat_id)),
@@ -1469,6 +1521,9 @@ def create_app(config: Config) -> Flask:
             load_history(chat_store.history_path(config.workspace_dir, chat_id)),
             config.max_history_turns,
         )
+        chat = next((c for c in chat_store.list_chats(config.workspace_dir) if c["id"] == chat_id), None)
+        role = chat.get("role") if chat else None
+        state["role"] = role if role in ROLES else default_role
 
     @app.route("/api/chats")
     def chats_endpoint():
@@ -1483,7 +1538,7 @@ def create_app(config: Config) -> Flask:
         # switch/delete guards below.
         if state.get("cancel_event") is not None:
             return jsonify({"error": "a reply is still generating"}), 409
-        chat = chat_store.create_chat(config.workspace_dir)
+        chat = chat_store.create_chat(config.workspace_dir, role=default_role)
         _switch_chat(chat["id"])
         return jsonify(chat)
 
@@ -1529,7 +1584,7 @@ def create_app(config: Config) -> Flask:
         if remaining:
             _switch_chat(remaining[0]["id"])
         else:
-            _switch_chat(chat_store.create_chat(config.workspace_dir)["id"])
+            _switch_chat(chat_store.create_chat(config.workspace_dir, role=default_role)["id"])
         return jsonify({"ok": True, "active_id": state["chat_id"]})
 
     @app.route("/api/autonomous-log")
@@ -1556,6 +1611,24 @@ def create_app(config: Config) -> Flask:
         # process's own scheduler thread — read fresh from disk rather
         # than caching.
         return jsonify({"jobs": load_cron_jobs(config.workspace_dir)})
+
+    @app.route("/api/activity")
+    def activity_endpoint():
+        # "What's happening right now, unattended" — a cron job firing in
+        # this same process (get_active_cron_job reads an in-memory flag
+        # set by talaria/cron_scheduler.py), and/or an autonomous check-in
+        # in progress in the separate `python -m talaria.autonomous`
+        # process (which can only signal this one via a small status file
+        # it writes/removes around each run — see talaria/autonomous.py).
+        autonomous = None
+        status_path = os.path.join(config.workspace_dir, ".autonomous_status.json")
+        if os.path.isfile(status_path):
+            try:
+                with open(status_path, "r", encoding="utf-8") as f:
+                    autonomous = json.load(f)
+            except Exception:
+                autonomous = None
+        return jsonify({"cron": get_active_cron_job(), "autonomous": autonomous})
 
     @app.route("/workspace-file/<path:relpath>")
     def workspace_file(relpath):
@@ -1601,6 +1674,7 @@ def create_app(config: Config) -> Flask:
             if name not in ROLES:
                 return jsonify({"error": f"unknown role {name!r}"}), 400
             state["role"] = name
+            chat_store.set_chat_role(config.workspace_dir, state["chat_id"], name)
         return jsonify(
             {"current": state["role"], "roles": {k: v["description"] for k, v in ROLES.items()}}
         )

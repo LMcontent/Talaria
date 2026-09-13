@@ -1,3 +1,7 @@
+import threading
+import time
+
+from talaria.tools import goals as goals_mod
 from talaria.tools.goals import goal_add, goal_focus, goal_list, goal_update
 
 
@@ -132,3 +136,33 @@ def test_focus_shows_recent_notes(tmp_path):
 
     out = goal_focus(str(tmp_path))
     assert "tried approach X" in out
+
+
+def test_concurrent_goal_add_does_not_lose_an_update_or_collide_ids(tmp_path, monkeypatch):
+    # Regression test for the exact race STATE_LOCK exists to prevent: two
+    # goal_add calls firing in the same turn (tool calls can now run in
+    # parallel, see talaria/agent.py) must not both read the same stale
+    # max-id and each save their own version over the other's. Widen the
+    # load-to-save window with an artificial sleep so the race would
+    # actually manifest if the lock were missing.
+    ws = str(tmp_path)
+    original_load = goals_mod._load
+
+    def slow_load(workspace_dir):
+        data = original_load(workspace_dir)
+        time.sleep(0.05)
+        return data
+
+    monkeypatch.setattr(goals_mod, "_load", slow_load)
+
+    threads = [
+        threading.Thread(target=goal_add, args=(ws,), kwargs={"title": f"Goal {i}"}) for i in range(5)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    saved = original_load(ws)
+    assert len(saved) == 5
+    assert {g["id"] for g in saved} == {1, 2, 3, 4, 5}

@@ -1,5 +1,8 @@
+import threading
+import time
 from datetime import datetime, timezone
 
+from talaria.tools import cron as cron_mod
 from talaria.tools.cron import (
     cron_add,
     cron_list,
@@ -105,3 +108,33 @@ def test_cron_toggle_disables_and_enables(tmp_path):
 def test_make_cron_tools_names(tmp_path):
     names = {t.name for t in make_cron_tools(str(tmp_path))}
     assert names == {"cron_add", "cron_list", "cron_remove", "cron_toggle"}
+
+
+def test_concurrent_cron_add_does_not_lose_an_update_or_collide_ids(tmp_path, monkeypatch):
+    # Regression test for the exact race STATE_LOCK exists to prevent: two
+    # cron_add calls firing in the same turn (tool calls can now run in
+    # parallel, see talaria/agent.py) must not both read the same stale
+    # max-id and each save their own version over the other's. Widen the
+    # load-to-save window with an artificial sleep so the race would
+    # actually manifest if the lock were missing.
+    ws = str(tmp_path)
+    original_load = cron_mod.load_jobs
+
+    def slow_load(workspace_dir):
+        data = original_load(workspace_dir)
+        time.sleep(0.05)
+        return data
+
+    monkeypatch.setattr(cron_mod, "load_jobs", slow_load)
+
+    threads = [
+        threading.Thread(target=cron_add, args=(ws, "* * * * *", f"job {i}")) for i in range(5)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    saved = original_load(ws)
+    assert len(saved) == 5
+    assert {j["id"] for j in saved} == {1, 2, 3, 4, 5}

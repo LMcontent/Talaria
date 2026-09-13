@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 
 from talaria.providers.base import ToolSpec
+from talaria.tools.state_lock import STATE_LOCK
 
 _FIELD_RANGES = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 6)]
 _FIELD_NAMES = ["minute", "hour", "day-of-month", "month", "day-of-week"]
@@ -142,19 +143,22 @@ def cron_add(workspace_dir: str, schedule: str, prompt: str, name: str = "") -> 
     if not p:
         return "Error: 'prompt' is required — what should the agent do when this fires?"
 
-    jobs = load_jobs(workspace_dir)
-    jid = max([j["id"] for j in jobs], default=0) + 1
-    jobs.append({
-        "id": jid,
-        "name": str(name).strip(),
-        "schedule": sched,
-        "prompt": p,
-        "enabled": True,
-        "created": _now(),
-        "last_run": None,
-        "last_fired_minute": None,
-    })
-    save_jobs(workspace_dir, jobs)
+    with STATE_LOCK:
+        jobs = load_jobs(workspace_dir)
+        # Guarding gid computation too, same reason as goal_add — two
+        # concurrent cron_add calls could otherwise compute the same id.
+        jid = max([j["id"] for j in jobs], default=0) + 1
+        jobs.append({
+            "id": jid,
+            "name": str(name).strip(),
+            "schedule": sched,
+            "prompt": p,
+            "enabled": True,
+            "created": _now(),
+            "last_run": None,
+            "last_fired_minute": None,
+        })
+        save_jobs(workspace_dir, jobs)
     label = f" '{name}'" if str(name).strip() else ""
     return f"Added cron job #{jid}{label}: '{sched}' (UTC) — runs while a Talaria process is up."
 
@@ -179,12 +183,13 @@ def cron_remove(workspace_dir: str, id: str) -> str:
         jid = int(str(id).strip())
     except ValueError:
         return "Error: id must be a numeric job id."
-    jobs = load_jobs(workspace_dir)
-    job = _find(jobs, jid)
-    if job is None:
-        return f"Error: no cron job #{jid} (see cron_list)."
-    jobs = [j for j in jobs if j["id"] != jid]
-    save_jobs(workspace_dir, jobs)
+    with STATE_LOCK:
+        jobs = load_jobs(workspace_dir)
+        job = _find(jobs, jid)
+        if job is None:
+            return f"Error: no cron job #{jid} (see cron_list)."
+        jobs = [j for j in jobs if j["id"] != jid]
+        save_jobs(workspace_dir, jobs)
     return f"Removed cron job #{jid}."
 
 
@@ -195,12 +200,13 @@ def cron_toggle(workspace_dir: str, id: str, enabled: str) -> str:
     except ValueError:
         return "Error: id must be a numeric job id."
     en = str(enabled).strip().lower() in ("true", "1", "yes", "y", "on")
-    jobs = load_jobs(workspace_dir)
-    job = _find(jobs, jid)
-    if job is None:
-        return f"Error: no cron job #{jid} (see cron_list)."
-    job["enabled"] = en
-    save_jobs(workspace_dir, jobs)
+    with STATE_LOCK:
+        jobs = load_jobs(workspace_dir)
+        job = _find(jobs, jid)
+        if job is None:
+            return f"Error: no cron job #{jid} (see cron_list)."
+        job["enabled"] = en
+        save_jobs(workspace_dir, jobs)
     return f"Cron job #{jid} is now {'enabled' if en else 'disabled'}."
 
 

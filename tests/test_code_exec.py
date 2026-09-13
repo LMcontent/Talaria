@@ -1,3 +1,6 @@
+import threading
+import time
+
 from talaria.tools.code_exec import install_package, run_python
 
 
@@ -63,3 +66,36 @@ def test_install_package_resolves_a_callable_confirmation(tmp_path, monkeypatch)
     result = install_package(str(tmp_path / "ws"), "requests", require_confirmation=lambda: True)
     assert "declined" in result
     assert not (tmp_path / "ws" / ".sandbox").exists()
+
+
+def test_concurrent_confirmations_are_serialized_not_interleaved(tmp_path, monkeypatch):
+    # Regression test for the exact race CONFIRMATION_LOCK exists to
+    # prevent: with tool calls now able to run in parallel (see
+    # talaria/agent.py), two run_python confirmation prompts firing at
+    # once must not race for the same input() — they should queue up one
+    # at a time. Track how many fake input() calls are "in flight"
+    # simultaneously; a fully-serialized run never sees more than one.
+    active = {"count": 0, "max": 0}
+    guard = threading.Lock()
+
+    def fake_input(prompt=""):
+        with guard:
+            active["count"] += 1
+            active["max"] = max(active["max"], active["count"])
+        time.sleep(0.05)
+        with guard:
+            active["count"] -= 1
+        return "n"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    threads = [
+        threading.Thread(target=run_python, args=(str(tmp_path / f"ws{i}"), "print(1)"))
+        for i in range(3)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert active["max"] == 1

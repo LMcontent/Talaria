@@ -341,6 +341,21 @@ is logged to `WORKSPACE_DIR/.cron_log.json`, printed to the terminal, and
 shown in the web UI sidebar's "Cron jobs" section alongside each job's
 schedule and last-run time.
 
+### Active now (web UI sidebar)
+
+Cron jobs and autonomous check-ins both run unattended, so it's easy to
+lose track of whether anything is actually happening right now versus just
+sitting idle between runs. When either is mid-run, the web UI's sidebar
+shows an "Active now" section — "Cron #N ... is running" and/or
+"Autonomous check-in in progress — <current focus>" — polled every few
+seconds via `/api/activity`, and hidden entirely when nothing is active. A
+cron job's in-progress state lives in the same process as the web UI (an
+in-memory flag set by the scheduler thread); an autonomous check-in runs
+in its own separate process, so it signals the web UI the same way the
+autonomous log does — through a small status file
+(`WORKSPACE_DIR/.autonomous_status.json`) written while a check-in is
+running and removed the moment it finishes.
+
 ### Checkpoints
 
 Before a risky or experimental task, ask the agent to `checkpoint_save`
@@ -407,6 +422,20 @@ also shows up automatically for any OpenAI-compatible router that relays
 a reasoning model's chain of thought via a `reasoning_content`/`reasoning`
 delta field (not all of them do; this is best-effort, since it's not part
 of the standard OpenAI wire format).
+
+**When a single turn asks for more than one tool call at once** (e.g. two
+`delegate_task` fan-outs, or several independent `web_search`es), they run
+concurrently instead of one at a time — a turn that used to pay for each
+call's latency serially now only pays for the slowest one. All the pending
+tool-call panels appear up front, in request order, then fill in with
+their results as each one actually finishes — which, since they're
+running in parallel, isn't necessarily the same order they were announced
+in. The interactive `run_python`/`install_package`/`propose_skill`
+confirmation prompt and the small JSON-backed state files (`remember`,
+goals, cron jobs, checkpoints) stay safe under this: concurrent
+confirmation prompts queue up one at a time in the terminal instead of
+racing for the same input, and concurrent writes to the same state file
+are serialized instead of silently losing one.
 
 ### Reasoning depth and turn limits
 
@@ -516,6 +545,13 @@ Left at `0` (default), only the raw token count is shown — no guessed cost.
 `/role` lists the built-in roles and shows which is active; `/role <name>`
 switches (changes only the system prompt going forward — history is kept).
 Set a different starting role with `DEFAULT_ROLE` in `.env`.
+
+In the web UI, role is **per chat**, not global — the sidebar's Role
+dropdown always shows and changes the current chat's own role, so a
+"coder" chat and a "researcher" chat can run side by side without one
+switch affecting the other. A new chat starts at `DEFAULT_ROLE`; switching
+chats switches which role is active the same way it already switches
+history.
 
 | Role | Focus |
 |---|---|
