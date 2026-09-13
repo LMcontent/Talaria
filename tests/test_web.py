@@ -118,6 +118,8 @@ def test_chat_rejects_empty_message(app_factory):
 
 
 def test_chat_returns_reply_and_persists_history(app_factory):
+    from talaria import chats as chat_store
+
     client, config, _ = app_factory([ProviderResponse(text="hi there", tool_calls=[])])
 
     resp = client.post("/api/chat", json={"message": "hello"})
@@ -125,7 +127,9 @@ def test_chat_returns_reply_and_persists_history(app_factory):
     assert resp.status_code == 200
     assert resp.get_json()["reply"] == "hi there"
 
-    with open(config.memory_file, encoding="utf-8") as f:
+    active_id = client.get("/api/chats").get_json()["active_id"]
+    history_path = chat_store.history_path(config.workspace_dir, active_id)
+    with open(history_path, encoding="utf-8") as f:
         saved = json.load(f)
     assert saved[0] == {"role": "user", "content": "hello"}
     assert saved[1]["content"] == "hi there"
@@ -220,6 +224,157 @@ def test_reset_clears_history(app_factory):
 
     assert resp.get_json() == {"ok": True}
     assert client.get("/api/history").get_json()["turns"] == []
+
+
+def test_chats_endpoint_starts_with_one_chat(app_factory):
+    client, _, _ = app_factory([])
+    data = client.get("/api/chats").get_json()
+    assert len(data["chats"]) == 1
+    assert data["chats"][0]["id"] == data["active_id"]
+    assert data["chats"][0]["title"] == "New chat"
+
+
+def test_new_chat_switches_active_and_starts_empty(app_factory):
+    client, _, _ = app_factory([ProviderResponse(text="hi", tool_calls=[])])
+    client.post("/api/chat", json={"message": "hello"})
+    first_id = client.get("/api/chats").get_json()["active_id"]
+
+    resp = client.post("/api/chats/new")
+    new_chat = resp.get_json()
+
+    assert new_chat["id"] != first_id
+    assert client.get("/api/chats").get_json()["active_id"] == new_chat["id"]
+    assert client.get("/api/history").get_json()["turns"] == []
+    # The list now has both chats.
+    ids = [c["id"] for c in client.get("/api/chats").get_json()["chats"]]
+    assert set(ids) == {first_id, new_chat["id"]}
+
+
+def test_first_message_auto_titles_the_chat(app_factory):
+    client, _, _ = app_factory([ProviderResponse(text="hi", tool_calls=[])])
+    client.post("/api/chat", json={"message": "help me plan a trip to Japan"})
+
+    chats = client.get("/api/chats").get_json()["chats"]
+    assert chats[0]["title"] == "help me plan a trip to Japan"
+
+
+def test_second_message_does_not_retitle_the_chat(app_factory):
+    client, _, _ = app_factory(
+        [ProviderResponse(text="hi", tool_calls=[]), ProviderResponse(text="ok", tool_calls=[])]
+    )
+    client.post("/api/chat", json={"message": "first message sets the title"})
+    client.post("/api/chat", json={"message": "second message should not"})
+
+    chats = client.get("/api/chats").get_json()["chats"]
+    assert chats[0]["title"] == "first message sets the title"
+
+
+def test_switch_chat_loads_its_own_history(app_factory):
+    client, _, _ = app_factory(
+        [ProviderResponse(text="reply A", tool_calls=[]), ProviderResponse(text="reply B", tool_calls=[])]
+    )
+    client.post("/api/chat", json={"message": "message in chat A"})
+    chat_a_id = client.get("/api/chats").get_json()["active_id"]
+
+    client.post("/api/chats/new")
+    client.post("/api/chat", json={"message": "message in chat B"})
+
+    switch_resp = client.post("/api/chats/switch", json={"id": chat_a_id})
+    assert switch_resp.get_json() == {"ok": True, "id": chat_a_id}
+
+    turns = client.get("/api/history").get_json()["turns"]
+    assert turns[0]["text"] == "message in chat A"
+
+
+def test_switch_to_unknown_chat_404s(app_factory):
+    client, _, _ = app_factory([])
+    resp = client.post("/api/chats/switch", json={"id": "nonexistent"})
+    assert resp.status_code == 404
+
+
+def test_rename_chat(app_factory):
+    client, _, _ = app_factory([])
+    chat_id = client.get("/api/chats").get_json()["active_id"]
+
+    resp = client.post("/api/chats/rename", json={"id": chat_id, "title": "My renamed chat"})
+
+    assert resp.get_json() == {"ok": True}
+    assert client.get("/api/chats").get_json()["chats"][0]["title"] == "My renamed chat"
+
+
+def test_rename_rejects_empty_title(app_factory):
+    client, _, _ = app_factory([])
+    chat_id = client.get("/api/chats").get_json()["active_id"]
+    resp = client.post("/api/chats/rename", json={"id": chat_id, "title": "   "})
+    assert resp.status_code == 400
+
+
+def test_delete_non_active_chat_keeps_the_active_one(app_factory):
+    client, _, _ = app_factory([])
+    first_id = client.get("/api/chats").get_json()["active_id"]
+    second = client.post("/api/chats/new").get_json()
+
+    resp = client.post("/api/chats/delete", json={"id": first_id})
+
+    assert resp.get_json() == {"ok": True, "active_id": second["id"]}
+    ids = [c["id"] for c in client.get("/api/chats").get_json()["chats"]]
+    assert ids == [second["id"]]
+
+
+def test_delete_active_chat_switches_to_another(app_factory):
+    client, _, _ = app_factory([ProviderResponse(text="hi", tool_calls=[])])
+    client.post("/api/chat", json={"message": "in the first chat"})
+    first_id = client.get("/api/chats").get_json()["active_id"]
+    second = client.post("/api/chats/new").get_json()
+
+    resp = client.post("/api/chats/delete", json={"id": second["id"]})
+
+    assert resp.get_json()["active_id"] == first_id
+    assert client.get("/api/history").get_json()["turns"][0]["text"] == "in the first chat"
+
+
+def test_delete_last_remaining_chat_creates_a_fresh_one(app_factory):
+    client, _, _ = app_factory([])
+    only_id = client.get("/api/chats").get_json()["active_id"]
+
+    resp = client.post("/api/chats/delete", json={"id": only_id})
+
+    new_id = resp.get_json()["active_id"]
+    assert new_id != only_id
+    chats = client.get("/api/chats").get_json()["chats"]
+    assert len(chats) == 1
+    assert chats[0]["id"] == new_id
+
+
+def test_new_chat_rejected_while_generating(app_factory_with_provider):
+    provider = InterruptibleProvider(["partial "])
+    client, config = app_factory_with_provider(provider)
+
+    t = threading.Thread(target=lambda: client.post("/api/chat/stream", json={"message": "go"}))
+    t.start()
+    assert provider.first_chunk_sent.wait(timeout=5), "provider never emitted its first chunk"
+
+    resp = client.post("/api/chats/new")
+    assert resp.status_code == 409
+
+    provider.may_continue.set()
+    t.join(timeout=5)
+
+
+def test_switch_chat_rejected_while_generating(app_factory_with_provider):
+    provider = InterruptibleProvider(["partial "])
+    client, config = app_factory_with_provider(provider)
+    other = client.post("/api/chats/new").get_json()
+
+    t = threading.Thread(target=lambda: client.post("/api/chat/stream", json={"message": "go"}))
+    t.start()
+    assert provider.first_chunk_sent.wait(timeout=5), "provider never emitted its first chunk"
+
+    resp = client.post("/api/chats/switch", json={"id": other["id"]})
+    assert resp.status_code == 409
+
+    provider.may_continue.set()
+    t.join(timeout=5)
 
 
 def test_role_get_and_post(app_factory):
