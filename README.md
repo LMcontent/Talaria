@@ -118,10 +118,41 @@ python -m talaria.web
 
 Then open http://127.0.0.1:5000 (or whatever `WEB_HOST`/`WEB_PORT` you set).
 It's the same `Agent` and tools as the CLI — just a different front end.
-Layout is a sidebar (role switcher, reset button, a live token-usage box,
-and the full tool list with descriptions, always visible) plus a centered
-chat column, similar to Claude Code's UI, rather than a chat that
-stretches the full browser width.
+Layout is a sidebar (chat list, role switcher, reset button, a live
+token-usage box, and the full tool list with descriptions, always
+visible) plus a centered chat column, similar to Claude Code's UI, rather
+than a chat that stretches the full browser width.
+
+### Multiple chats
+
+The sidebar's **Chats** section is a ChatGPT/Claude.ai-style list of
+separate conversations, not one single ever-growing history — **+ New**
+starts a fresh chat, click any chat in the list to switch to it, hover
+for a rename (✎) or delete (×) icon. Each chat has its own history file
+under `WORKSPACE_DIR/chats/`; switching (or starting a new one) is
+instant, no restart. A chat is auto-titled from its first message (like
+most chat UIs) unless you rename it yourself; an untouched fresh chat
+stays "New chat" in the list until something's actually said in it.
+
+**Tools, skills, cron jobs, checkpoints, the goal tree, and long-term
+memory are shared across every chat** — they're capabilities and durable
+project state, not something scoped to one conversation, so a skill
+authored in one chat is immediately available in every other one. Only
+the moment-to-moment back-and-forth (conversation history) is split per
+chat; see "Memory" below for why long-term memory isn't just dumped into
+every chat wholesale despite being shared.
+
+Switching chats (or starting a new one) is blocked while a reply is still
+generating in the current one, to avoid a race between the switch and the
+in-flight reply's own save at the end of that turn — finish or Stop it
+first.
+
+The very first time you run the web UI after upgrading from an older
+version with a single `WORKSPACE_DIR/.history.json`, that file's content
+is imported as your first chat (titled "Imported chat") rather than
+discarded — from then on it isn't touched, everything lives under
+`WORKSPACE_DIR/chats/`. This is web-UI-only; the CLI still keeps its own
+single conversation via `MEMORY_FILE`, unaffected by any of this.
 
 "Open workspace folder" opens `WORKSPACE_DIR` in the file manager — the
 simplest way to hand the agent a file is to just drop it in there directly
@@ -209,11 +240,19 @@ Old turns are trimmed automatically once the conversation exceeds
 tune it in `.env` if you need a longer or shorter window.
 
 **Long-term memory** is separate from conversation history: the `remember`
-tool saves a fact/preference to `WORKSPACE_DIR/.notes.json`, which is
-injected into the system prompt on *every* future session — this is what
-actually lets the agent "know" things across restarts, not just within one
-open terminal. `recall` lists saved notes with their index, `forget
-<index>` removes one. Override the file with `NOTES_FILE` in `.env`.
+tool saves a fact/preference to `WORKSPACE_DIR/.notes.json`, letting the
+agent "know" things across restarts (and, in the web UI, across separate
+chats — see below), not just within one open terminal. `recall` lists
+saved notes with their index, `forget <index>` removes one.
+Override the file with `NOTES_FILE` in `.env`.
+
+Notes are **not** force-injected into every system prompt — only a short
+hint that long-term memory exists and is worth checking is added when
+there's anything saved, and the model calls `recall` itself when it
+judges that relevant. This is deliberate: dumping every saved note into
+every prompt regardless of relevance gets worse the more you accumulate,
+and turns actively counterproductive once separate chats exist (a fresh,
+unrelated chat starting out clogged with facts from a different task).
 
 ### Goals
 

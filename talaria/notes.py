@@ -1,13 +1,13 @@
 """Long-term memory: facts the agent explicitly chooses to remember,
 persisted across sessions — distinct from conversation history, which is
-just the raw back-and-forth. Injected into the system prompt on every turn.
+just the raw back-and-forth. Pulled in on demand via the recall tool
+(talaria/tools/memory_tools.py), not force-injected into every system
+prompt — see talaria/system_prompt.py for why.
 """
 
 import json
 import os
 from datetime import datetime, timezone
-
-_MAX_INJECTED_CHARS = 3000
 
 
 def load_notes(path: str) -> list[dict]:
@@ -39,13 +39,3 @@ def forget_note(path: str, index: int) -> str:
     removed = notes.pop(index)
     save_notes(path, notes)
     return f"Forgot note #{index}: {removed['text']!r}"
-
-
-def format_notes_for_prompt(notes: list[dict]) -> str:
-    if not notes:
-        return ""
-    lines = [f"[{i}] {n['text']}" for i, n in enumerate(notes)]
-    text = "\n".join(lines)
-    if len(text) > _MAX_INJECTED_CHARS:
-        text = text[-_MAX_INJECTED_CHARS:]  # keep the most recent notes
-    return "Known facts remembered from previous sessions:\n" + text

@@ -19,6 +19,7 @@ import threading
 
 from flask import Flask, Response, abort, jsonify, render_template_string, request, send_file
 
+import talaria.chats as chat_store
 from talaria.agent import Agent
 from talaria.compaction import compact_history
 from talaria.config import Config, load_config
@@ -136,6 +137,22 @@ INDEX_HTML = r"""<!doctype html>
   .tool-item .tname, .log-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
   .tool-item .tdesc, .log-item .tdesc { color: #777; margin-top: 2px; line-height: 1.35; }
   .log-item .tname { font-family: inherit; font-weight: 400; color: #555; font-size: 0.9em; }
+
+  .chat-item {
+    display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-radius: 6px;
+    cursor: pointer; font-size: 17px;
+  }
+  .chat-item:hover { background: rgba(0, 0, 0, 0.05); }
+  .chat-item.active { background: rgba(43, 108, 176, 0.12); font-weight: 600; }
+  .chat-item .chat-title {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
+  .chat-action {
+    flex-shrink: 0; padding: 2px 5px; border-radius: 4px; color: #888;
+    text-decoration: none; font-size: 14px; opacity: 0;
+  }
+  .chat-item:hover .chat-action { opacity: 1; }
+  .chat-action:hover { background: rgba(0, 0, 0, 0.1); color: #333; }
 
   .sidebar-section-title a {
     float: right; text-decoration: none; color: inherit; font-weight: 400;
@@ -265,6 +282,10 @@ INDEX_HTML = r"""<!doctype html>
     .mode-group { border-color: #444; }
     .mode-btn { background: #24262c; color: #ccc; border-color: #444; }
     .log-item .tname { color: #999; }
+    .chat-item:hover { background: rgba(255, 255, 255, 0.07); }
+    .chat-item.active { background: rgba(91, 159, 212, 0.18); }
+    .chat-action { color: #999; }
+    .chat-action:hover { background: rgba(255, 255, 255, 0.12); color: #eee; }
     .sidebar-section-title a:hover { color: #5a9fd4; }
     #usage-box { color: #aaa; }
     form#composer { background: #1f2126; border-color: #333; }
@@ -293,6 +314,13 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div class="meta">provider: {{ provider_name }} &middot; model: {{ model_name }}</div>
   <div class="sidebar-section">
+    <div class="sidebar-section-title">
+      Chats
+      <a id="new-chat-btn" href="#" title="Start a new chat, separate from the current one">+ New</a>
+    </div>
+    <div id="chats-list">Loading…</div>
+  </div>
+  <div class="sidebar-section">
     <div class="sidebar-section-title">Role</div>
     <select id="role-select">
       {% for name, info in roles.items() %}
@@ -310,7 +338,7 @@ INDEX_HTML = r"""<!doctype html>
     <div id="mode-desc" class="tdesc">run_python / install_package ask for confirmation in the terminal.</div>
   </div>
   <div class="sidebar-section">
-    <button id="reset-btn" type="button">Reset history</button>
+    <button id="reset-btn" type="button" title="Clears this chat's messages without deleting the chat itself">Clear this chat</button>
     <button id="open-workspace-btn" type="button" title="Opens the workspace folder on the machine running this server">Open workspace folder</button>
   </div>
   <div class="sidebar-section">
@@ -350,6 +378,8 @@ const scrollEl = document.getElementById("messages");
 const form = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
+const chatsList = document.getElementById("chats-list");
+const newChatBtn = document.getElementById("new-chat-btn");
 const roleSelect = document.getElementById("role-select");
 const resetBtn = document.getElementById("reset-btn");
 const openWorkspaceBtn = document.getElementById("open-workspace-btn");
@@ -829,6 +859,10 @@ form.addEventListener("submit", async (e) => {
     stopWorkingIndicator();
     input.focus();
     loadUsage();
+    // The chat may have just been auto-titled from this message (if it
+    // was the first one) and/or moved to the top of the list (most
+    // recently active) — refresh so the sidebar reflects that.
+    loadChats();
   }
 });
 
@@ -846,6 +880,110 @@ async function loadHistory() {
     }
   }
   scrollEl.scrollTop = scrollEl.scrollHeight;
+}
+
+async function loadChats() {
+  const res = await fetch("/api/chats");
+  const data = await res.json();
+  chatsList.innerHTML = "";
+  for (const c of data.chats) {
+    const item = document.createElement("div");
+    item.className = "chat-item" + (c.id === data.active_id ? " active" : "");
+
+    const title = document.createElement("span");
+    title.className = "chat-title";
+    title.textContent = c.title;
+    item.appendChild(title);
+
+    const renameLink = document.createElement("a");
+    renameLink.className = "chat-action";
+    renameLink.href = "#";
+    renameLink.title = "Rename this chat";
+    renameLink.textContent = "✎";
+    renameLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      renameChat(c.id, c.title);
+    });
+    item.appendChild(renameLink);
+
+    const deleteLink = document.createElement("a");
+    deleteLink.className = "chat-action";
+    deleteLink.href = "#";
+    deleteLink.title = "Delete this chat";
+    deleteLink.textContent = "×";
+    deleteLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteChat(c.id, c.title);
+    });
+    item.appendChild(deleteLink);
+
+    item.addEventListener("click", () => switchChat(c.id));
+    chatsList.appendChild(item);
+  }
+}
+
+async function switchChat(id) {
+  // Switching mid-generation would race the streaming worker's own
+  // state["history"]/save at the end of that turn (see the server-side
+  // guard on /api/chats/switch) — block it here too, before the request.
+  if (generating) return;
+  const res = await fetch("/api/chats/switch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    addMessage("Error: " + (data.error || res.statusText), "error");
+    return;
+  }
+  await loadHistory();
+  await loadChats();
+}
+
+newChatBtn.addEventListener("click", async (e) => {
+  e.preventDefault();
+  if (generating) return;
+  const res = await fetch("/api/chats/new", { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    addMessage("Error: " + (data.error || res.statusText), "error");
+    return;
+  }
+  await loadHistory();
+  await loadChats();
+  input.focus();
+});
+
+async function renameChat(id, currentTitle) {
+  const title = prompt("Rename chat:", currentTitle);
+  if (title === null) return;
+  const trimmed = title.trim();
+  if (!trimmed || trimmed === currentTitle) return;
+  await fetch("/api/chats/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, title: trimmed }),
+  });
+  await loadChats();
+}
+
+async function deleteChat(id, title) {
+  if (!confirm("Delete chat \"" + title + "\"? This can't be undone.")) return;
+  const res = await fetch("/api/chats/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    addMessage("Error: " + (data.error || res.statusText), "error");
+    return;
+  }
+  await loadHistory();
+  await loadChats();
 }
 
 // A reply kicked off before a reload (or from another tab) keeps running
@@ -878,12 +1016,14 @@ async function checkOngoingGeneration() {
       stopWorkingIndicator();
       await loadHistory();
       loadUsage();
+      loadChats();
     }
   }, 1000);
 }
 
 (async () => {
   await loadHistory();
+  await loadChats();
   await checkOngoingGeneration();
 })();
 
@@ -1101,9 +1241,28 @@ def create_app(config: Config) -> Flask:
         input_price_per_m=config.token_price_input_per_m,
         output_price_per_m=config.token_price_output_per_m,
     )
+    # Multiple independent chats (talaria/chats.py), each with its own
+    # history file under WORKSPACE_DIR/chats/ — the first run migrates
+    # whatever was in the old single MEMORY_FILE into one chat instead of
+    # discarding it, rather than silently losing existing history.
+    existing_chats = chat_store.list_chats(config.workspace_dir)
+    if not existing_chats:
+        legacy_history = load_history(config.memory_file)
+        first_chat = chat_store.create_chat(
+            config.workspace_dir, title="Imported chat" if legacy_history else "New chat"
+        )
+        if legacy_history:
+            save_history(chat_store.history_path(config.workspace_dir, first_chat["id"]), legacy_history)
+        existing_chats = [first_chat]
+    active_chat_id = existing_chats[0]["id"]
+
     state = {
         "role": config.default_role if config.default_role in ROLES else DEFAULT_ROLE,
-        "history": compact_history(load_history(config.memory_file), config.max_history_turns),
+        "chat_id": active_chat_id,
+        "history": compact_history(
+            load_history(chat_store.history_path(config.workspace_dir, active_chat_id)),
+            config.max_history_turns,
+        ),
         "cancel_event": None,
         # Safe (default, from .env): run_python/install_package ask for a
         # y/N confirmation in the terminal. Extreme: that prompt is
@@ -1157,8 +1316,10 @@ def create_app(config: Config) -> Flask:
             return jsonify({"error": "empty message"}), 400
 
         agent.system = build_system(state["role"], config.notes_file) + WEB_MEDIA_HINT
+        chat_id = state["chat_id"]
         history = state["history"]
         history_len_before = len(history)
+        is_first_message = history_len_before == 0
 
         print(f"\n[web] you> {user_input}")
         print("[web] talaria> ", end="", flush=True)
@@ -1172,7 +1333,11 @@ def create_app(config: Config) -> Flask:
         print()
 
         state["history"] = compact_history(history, config.max_history_turns)
-        save_history(config.memory_file, state["history"])
+        save_history(chat_store.history_path(config.workspace_dir, chat_id), state["history"])
+        if is_first_message:
+            chat_store.rename_chat(config.workspace_dir, chat_id, chat_store.auto_title(user_input))
+        else:
+            chat_store.touch_chat(config.workspace_dir, chat_id)
         return jsonify({"reply": reply})
 
     @app.route("/api/chat/stream", methods=["POST"])
@@ -1183,8 +1348,10 @@ def create_app(config: Config) -> Flask:
             return jsonify({"error": "empty message"}), 400
 
         agent.system = build_system(state["role"], config.notes_file) + WEB_MEDIA_HINT
+        chat_id = state["chat_id"]
         history = state["history"]
         history_len_before = len(history)
+        is_first_message = history_len_before == 0
 
         q: queue.Queue = queue.Queue()
         cancel_event = threading.Event()
@@ -1210,7 +1377,11 @@ def create_app(config: Config) -> Flask:
                     )
                 print()
                 state["history"] = compact_history(history, config.max_history_turns)
-                save_history(config.memory_file, state["history"])
+                save_history(chat_store.history_path(config.workspace_dir, chat_id), state["history"])
+                if is_first_message:
+                    chat_store.rename_chat(config.workspace_dir, chat_id, chat_store.auto_title(user_input))
+                else:
+                    chat_store.touch_chat(config.workspace_dir, chat_id)
                 state["cancel_event"] = None
                 q.put(("done", {}))
             except Exception as e:
@@ -1285,9 +1456,81 @@ def create_app(config: Config) -> Flask:
 
     @app.route("/api/reset", methods=["POST"])
     def reset():
+        # Clears the *active* chat's messages without deleting the chat
+        # itself — distinct from /api/chats/delete, which removes a chat
+        # from the list entirely.
         state["history"] = []
-        clear_history(config.memory_file)
+        clear_history(chat_store.history_path(config.workspace_dir, state["chat_id"]))
         return jsonify({"ok": True})
+
+    def _switch_chat(chat_id: str) -> None:
+        state["chat_id"] = chat_id
+        state["history"] = compact_history(
+            load_history(chat_store.history_path(config.workspace_dir, chat_id)),
+            config.max_history_turns,
+        )
+
+    @app.route("/api/chats")
+    def chats_endpoint():
+        chats = chat_store.list_chats(config.workspace_dir)
+        return jsonify({"chats": chats, "active_id": state["chat_id"]})
+
+    @app.route("/api/chats/new", methods=["POST"])
+    def chats_new():
+        # Switching the active chat while a reply is still streaming would
+        # race the worker thread's own state["history"]/save at the end of
+        # that turn (see chat_stream's worker) — same reasoning as the
+        # switch/delete guards below.
+        if state.get("cancel_event") is not None:
+            return jsonify({"error": "a reply is still generating"}), 409
+        chat = chat_store.create_chat(config.workspace_dir)
+        _switch_chat(chat["id"])
+        return jsonify(chat)
+
+    @app.route("/api/chats/switch", methods=["POST"])
+    def chats_switch():
+        if state.get("cancel_event") is not None:
+            return jsonify({"error": "a reply is still generating"}), 409
+        data = request.get_json(force=True) or {}
+        chat_id = data.get("id")
+        if not any(c["id"] == chat_id for c in chat_store.list_chats(config.workspace_dir)):
+            return jsonify({"error": f"no chat {chat_id!r}"}), 404
+        _switch_chat(chat_id)
+        return jsonify({"ok": True, "id": chat_id})
+
+    @app.route("/api/chats/rename", methods=["POST"])
+    def chats_rename():
+        data = request.get_json(force=True) or {}
+        chat_id = data.get("id")
+        title = (data.get("title") or "").strip()
+        if not title:
+            return jsonify({"error": "title must not be empty"}), 400
+        if not chat_store.rename_chat(config.workspace_dir, chat_id, title):
+            return jsonify({"error": f"no chat {chat_id!r}"}), 404
+        return jsonify({"ok": True})
+
+    @app.route("/api/chats/delete", methods=["POST"])
+    def chats_delete():
+        data = request.get_json(force=True) or {}
+        chat_id = data.get("id")
+        is_active = chat_id == state["chat_id"]
+        if is_active and state.get("cancel_event") is not None:
+            return jsonify({"error": "a reply is still generating"}), 409
+        if not chat_store.delete_chat(config.workspace_dir, chat_id):
+            return jsonify({"error": f"no chat {chat_id!r}"}), 404
+
+        remaining = chat_store.list_chats(config.workspace_dir)
+        if not is_active:
+            return jsonify({"ok": True, "active_id": state["chat_id"]})
+
+        # Deleted the chat we were on — land on the next most-recent one,
+        # or start a brand-new chat if that was the last one left, so
+        # there's always an active chat to talk in.
+        if remaining:
+            _switch_chat(remaining[0]["id"])
+        else:
+            _switch_chat(chat_store.create_chat(config.workspace_dir)["id"])
+        return jsonify({"ok": True, "active_id": state["chat_id"]})
 
     @app.route("/api/autonomous-log")
     def autonomous_log():
