@@ -192,6 +192,11 @@ def test_chat_stream_carries_tool_call_and_tool_result_events(app_factory):
     assert types == ["tool_call", "tool_result", "chunk"]
     assert events[0]["name"] == "remember"
     assert events[0]["input"] == {"text": "likes tea"}
+    # The frontend pairs tool_call/tool_result by id, not arrival order (see
+    # talaria/web.py's handleStreamEvent) — needed now that tool calls can
+    # run concurrently and finish out of order (talaria/agent.py).
+    assert events[0]["id"] == "1"
+    assert events[1]["id"] == "1"
     assert events[1]["name"] == "remember"
     assert "Remembered" in events[1]["result"]
     assert events[2]["text"] == "Noted."
@@ -394,6 +399,33 @@ def test_role_post_rejects_unknown_role(app_factory):
     assert resp.status_code == 400
 
 
+def test_role_is_scoped_per_chat_not_global(app_factory):
+    client, _, _ = app_factory([])
+
+    # Chat A: switch to researcher.
+    client.post("/api/role", json={"role": "researcher"})
+    assert client.get("/api/role").get_json()["current"] == "researcher"
+
+    # Chat B (brand new): must start at the configured default, not
+    # inherit chat A's researcher role.
+    client.post("/api/chats/new")
+    assert client.get("/api/role").get_json()["current"] == "assistant"
+
+    # Switch chat B to coder, then switch back to chat A — each chat
+    # must keep remembering its own role independently.
+    client.post("/api/role", json={"role": "coder"})
+    chat_b_id = client.get("/api/chats").get_json()["active_id"]
+
+    chats = client.get("/api/chats").get_json()["chats"]
+    chat_a_id = next(c["id"] for c in chats if c["id"] != chat_b_id)
+
+    client.post("/api/chats/switch", json={"id": chat_a_id})
+    assert client.get("/api/role").get_json()["current"] == "researcher"
+
+    client.post("/api/chats/switch", json={"id": chat_b_id})
+    assert client.get("/api/role").get_json()["current"] == "coder"
+
+
 def test_settings_get_and_post(app_factory):
     client, _, _ = app_factory([])
 
@@ -503,6 +535,32 @@ def test_cron_endpoint_lists_jobs_added_from_chat(app_factory):
     assert len(jobs) == 1
     assert jobs[0]["name"] == "Morning check"
     assert jobs[0]["schedule"] == "0 9 * * *"
+
+
+def test_activity_endpoint_is_empty_by_default(app_factory):
+    client, _, _ = app_factory([])
+    assert client.get("/api/activity").get_json() == {"cron": None, "autonomous": None}
+
+
+def test_activity_endpoint_reports_a_running_cron_job(app_factory, monkeypatch):
+    client, _, _ = app_factory([])
+    fake_job = {"id": 1, "name": "Morning check", "schedule": "0 9 * * *", "started": "2024-01-01T09:00:00+00:00"}
+    monkeypatch.setattr(web, "get_active_cron_job", lambda: fake_job)
+
+    assert client.get("/api/activity").get_json() == {"cron": fake_job, "autonomous": None}
+
+
+def test_activity_endpoint_reports_an_in_progress_autonomous_checkin(app_factory):
+    import json
+    import os
+
+    client, config, _ = app_factory([])
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    status = {"started": "2024-01-01T09:00:00+00:00", "focus": "FOCUS: #1 Ship the thing"}
+    with open(os.path.join(config.workspace_dir, ".autonomous_status.json"), "w", encoding="utf-8") as f:
+        json.dump(status, f)
+
+    assert client.get("/api/activity").get_json() == {"cron": None, "autonomous": status}
 
 
 def test_stop_returns_409_when_nothing_is_generating(app_factory):

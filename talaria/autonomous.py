@@ -18,6 +18,8 @@ and any already-installed skill (those were security-reviewed when
 approved via propose_skill in an earlier, attended session).
 """
 
+import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -53,6 +55,27 @@ PROMPT_TEMPLATE = (
 
 
 _LOG_FILENAME = ".autonomous_log.json"
+# Written while a check-in is actually running, removed right after — this
+# process is entirely separate from the web UI's (see module docstring), so
+# the only way for that sidebar to know "a check-in is in progress right
+# now" (rather than just seeing completed ones via the log above) is a
+# small file it can poll, not an in-memory flag.
+_STATUS_FILENAME = ".autonomous_status.json"
+
+
+def _write_status(workspace_dir: str, data: dict | None) -> None:
+    path = os.path.join(workspace_dir, _STATUS_FILENAME)
+    if data is None:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        return
+    os.makedirs(workspace_dir, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
 def build_autonomous_tools(config: Config, provider: Provider) -> list[ToolSpec]:
@@ -74,10 +97,15 @@ def tick(config: Config, provider: Provider, usage: UsageTracker) -> str | None:
         max_turns=config.max_turns, usage=usage,
     )
 
-    print(f"\n[autonomous] check-in at {datetime.now(timezone.utc).isoformat()}")
+    started = datetime.now(timezone.utc).isoformat()
+    print(f"\n[autonomous] check-in at {started}")
     print(f"[autonomous] {focus}")
     prompt = PROMPT_TEMPLATE.format(excluded=", ".join(sorted(EXCLUDED_TOOLS)), focus=focus)
-    reply = agent.run(prompt)
+    _write_status(config.workspace_dir, {"started": started, "focus": focus})
+    try:
+        reply = agent.run(prompt)
+    finally:
+        _write_status(config.workspace_dir, None)
     print()
 
     append_log(config.workspace_dir, _LOG_FILENAME, {

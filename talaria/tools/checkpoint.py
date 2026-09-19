@@ -5,6 +5,18 @@ experiment: `workspace_dir` (conversation history, notes, written files) and
 `./state` (relative to the process's cwd — where most skills persist their
 own JSON, e.g. errbook/feedback_loop/meaning_cache). Restoring only one of
 the two would leave stale "lessons" from the bad run in the other.
+
+checkpoint_save/checkpoint_restore hold STATE_LOCK (talaria/tools/state_lock.py)
+for their whole multi-step copy, so they can't race the JSON-state tools
+(remember/goal_add/cron_add/...) that also hold it — but that's a narrower
+guarantee than "safe against every other concurrent tool call": something
+like write_document isn't state-lock-protected, so a save/restore running
+at the exact moment another tool call is mid-write to a workspace file is
+still possible in principle, now that tool calls can run in parallel (see
+talaria/agent.py). Accepted as a known gap rather than a full
+whole-workspace lock: checkpoint_save/restore are rare, deliberate
+"before/after a risky experiment" actions, not something realistically
+fired in the same batch as unrelated parallel work.
 """
 
 import os
@@ -13,6 +25,7 @@ import shutil
 import time
 
 from talaria.providers.base import ToolSpec
+from talaria.tools.state_lock import STATE_LOCK
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _SKIP = {".checkpoints", ".sandbox"}
@@ -39,33 +52,38 @@ def checkpoint_save(workspace_dir: str, name: str = "") -> str:
     if err:
         return err
 
-    dest = os.path.join(_checkpoints_root(workspace_dir), name)
-    overwritten = os.path.isdir(dest)
-    if overwritten:
-        shutil.rmtree(dest)
-    os.makedirs(dest, exist_ok=True)
+    # Guards against the JSON-state tools (remember/goal_add/cron_add/...)
+    # writing mid-copy and ending up in the snapshot half-written — doesn't
+    # protect against every other tool (see the module docstring), but
+    # covers the most likely overlap.
+    with STATE_LOCK:
+        dest = os.path.join(_checkpoints_root(workspace_dir), name)
+        overwritten = os.path.isdir(dest)
+        if overwritten:
+            shutil.rmtree(dest)
+        os.makedirs(dest, exist_ok=True)
 
-    ws_dest = os.path.join(dest, "workspace")
-    os.makedirs(ws_dest, exist_ok=True)
-    n_files = 0
-    if os.path.isdir(workspace_dir):
-        for entry in os.listdir(workspace_dir):
-            if entry in _SKIP:
-                continue
-            src = os.path.join(workspace_dir, entry)
-            dst = os.path.join(ws_dest, entry)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst)
-                n_files += sum(len(files) for _, _, files in os.walk(dst))
-            else:
-                shutil.copy2(src, dst)
-                n_files += 1
+        ws_dest = os.path.join(dest, "workspace")
+        os.makedirs(ws_dest, exist_ok=True)
+        n_files = 0
+        if os.path.isdir(workspace_dir):
+            for entry in os.listdir(workspace_dir):
+                if entry in _SKIP:
+                    continue
+                src = os.path.join(workspace_dir, entry)
+                dst = os.path.join(ws_dest, entry)
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst)
+                    n_files += sum(len(files) for _, _, files in os.walk(dst))
+                else:
+                    shutil.copy2(src, dst)
+                    n_files += 1
 
-    state_src = _state_dir()
-    had_state = os.path.isdir(state_src)
-    if had_state:
-        shutil.copytree(state_src, os.path.join(dest, "state"))
-        n_files += sum(len(files) for _, _, files in os.walk(os.path.join(dest, "state")))
+        state_src = _state_dir()
+        had_state = os.path.isdir(state_src)
+        if had_state:
+            shutil.copytree(state_src, os.path.join(dest, "state"))
+            n_files += sum(len(files) for _, _, files in os.walk(os.path.join(dest, "state")))
 
     verb = "Overwrote" if overwritten else "Saved"
     return (
@@ -86,25 +104,26 @@ def checkpoint_restore(workspace_dir: str, name: str = "") -> str:
     if not os.path.isdir(src):
         return f"Error: no checkpoint named '{name}' (see checkpoint_list)."
 
-    ws_src = os.path.join(src, "workspace")
-    if os.path.isdir(workspace_dir):
-        for entry in os.listdir(workspace_dir):
-            if entry in _SKIP:
-                continue
-            path = os.path.join(workspace_dir, entry)
-            shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
-    os.makedirs(workspace_dir, exist_ok=True)
-    if os.path.isdir(ws_src):
-        for entry in os.listdir(ws_src):
-            s, d = os.path.join(ws_src, entry), os.path.join(workspace_dir, entry)
-            shutil.copytree(s, d) if os.path.isdir(s) else shutil.copy2(s, d)
+    with STATE_LOCK:
+        ws_src = os.path.join(src, "workspace")
+        if os.path.isdir(workspace_dir):
+            for entry in os.listdir(workspace_dir):
+                if entry in _SKIP:
+                    continue
+                path = os.path.join(workspace_dir, entry)
+                shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+        os.makedirs(workspace_dir, exist_ok=True)
+        if os.path.isdir(ws_src):
+            for entry in os.listdir(ws_src):
+                s, d = os.path.join(ws_src, entry), os.path.join(workspace_dir, entry)
+                shutil.copytree(s, d) if os.path.isdir(s) else shutil.copy2(s, d)
 
-    state_dst = _state_dir()
-    if os.path.isdir(state_dst):
-        shutil.rmtree(state_dst)
-    state_src = os.path.join(src, "state")
-    if os.path.isdir(state_src):
-        shutil.copytree(state_src, state_dst)
+        state_dst = _state_dir()
+        if os.path.isdir(state_dst):
+            shutil.rmtree(state_dst)
+        state_src = os.path.join(src, "state")
+        if os.path.isdir(state_src):
+            shutil.copytree(state_src, state_dst)
 
     return (
         f"Restored checkpoint '{name}'. Files on disk are back to that point. "
@@ -134,10 +153,11 @@ def checkpoint_discard(workspace_dir: str, name: str = "") -> str:
     err = _validate_name(name)
     if err:
         return err
-    dest = os.path.join(_checkpoints_root(workspace_dir), name)
-    if not os.path.isdir(dest):
-        return f"Error: no checkpoint named '{name}' (see checkpoint_list)."
-    shutil.rmtree(dest)
+    with STATE_LOCK:
+        dest = os.path.join(_checkpoints_root(workspace_dir), name)
+        if not os.path.isdir(dest):
+            return f"Error: no checkpoint named '{name}' (see checkpoint_list)."
+        shutil.rmtree(dest)
     return f"Discarded checkpoint '{name}'."
 
 

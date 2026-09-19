@@ -1,7 +1,8 @@
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
-from talaria.providers.base import EventCallback, Provider, ToolSpec
+from talaria.providers.base import EventCallback, Provider, ToolCall, ToolSpec
 from talaria.usage import UsageTracker
 
 DEFAULT_SYSTEM = (
@@ -43,6 +44,8 @@ class Agent:
         """Run one turn. If `history` is given, it is mutated in place with
         the full turn (including any tool calls) so the caller can keep
         reusing the same list across turns for a multi-turn conversation.
+        When the model asks for more than one tool call in a turn, they run
+        concurrently (see _run_tool_calls) rather than one at a time.
         `on_chunk`, if given, is called with each text delta as it streams
         in (in addition to the provider always printing it to stdout).
         `on_event`, if given, is called for model thinking (passed through
@@ -86,14 +89,14 @@ class Agent:
             if response.cancelled or not response.tool_calls:
                 return response.text
 
+            results = self._run_tool_calls(response.tool_calls, on_event)
             for call in response.tool_calls:
-                result = self._call_tool(call.name, call.input, on_event=on_event)
                 history.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
                         "name": call.name,
-                        "content": result,
+                        "content": results[call.id],
                     }
                 )
 
@@ -114,24 +117,63 @@ class Agent:
             self.tools_by_name[t.name] = t
         self.tools = list(self.tools_by_name.values())
 
-    def _call_tool(self, name: str, tool_input: dict, on_event: EventCallback | None = None) -> str:
-        tool = self.tools_by_name.get(name)
-        if tool is None:
-            return f"Error: unknown tool {name!r}"
+    def _run_tool_calls(
+        self, tool_calls: list[ToolCall], on_event: EventCallback | None
+    ) -> dict[str, str]:
+        """Runs every tool call from one model turn and returns {call.id: result}.
+
+        Announces all of them (prints + fires "tool_call") up front, in
+        request order, before running any — so a caller like the web UI
+        can show every pending call immediately instead of only as each
+        one happens to start on its own worker thread. A single call just
+        runs inline; more than one run concurrently via a thread pool —
+        the actual point of this, so a turn asking for several independent
+        web_search/delegate_task calls no longer pays for them one at a
+        time. Safe to do: a confirmation prompt (run_python/
+        install_package/propose_skill) serializes against another one via
+        CONFIRMATION_LOCK instead of two racing for the same input(), and
+        the JSON-state tools (remember/goal_add/cron_add/checkpoint_*)
+        serialize via STATE_LOCK instead of silently losing a concurrent
+        write (see talaria/tools/confirmation.py and
+        talaria/tools/state_lock.py).
+        """
+        for call in tool_calls:
+            self._announce_tool_call(call, on_event)
+
+        if len(tool_calls) == 1:
+            call = tool_calls[0]
+            return {call.id: self._execute_tool(call, on_event)}
+
+        results: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=len(tool_calls)) as executor:
+            future_to_call = {
+                executor.submit(self._execute_tool, call, on_event): call for call in tool_calls
+            }
+            for future in as_completed(future_to_call):
+                results[future_to_call[future].id] = future.result()
+        return results
+
+    def _announce_tool_call(self, call: ToolCall, on_event: EventCallback | None) -> None:
         # Printed unconditionally (not just via on_chunk/streaming) so it's
         # always visible in the terminal — the only way to tell "the model
         # actually called this tool" from "the model just said in text that
         # it would", which matters a lot with local/smaller models that
         # sometimes narrate an action instead of emitting a real tool call.
-        print(f"\n[tool] {_format_tool_call(name, tool_input)}", flush=True)
+        print(f"\n[tool] {_format_tool_call(call.name, call.input)}", flush=True)
         if on_event:
-            on_event("tool_call", {"name": name, "input": tool_input})
-        try:
-            result = str(tool.handler(**tool_input))
-        except Exception as e:
-            result = f"Error running tool {name}: {e}"
+            on_event("tool_call", {"id": call.id, "name": call.name, "input": call.input})
+
+    def _execute_tool(self, call: ToolCall, on_event: EventCallback | None) -> str:
+        tool = self.tools_by_name.get(call.name)
+        if tool is None:
+            result = f"Error: unknown tool {call.name!r}"
+        else:
+            try:
+                result = str(tool.handler(**call.input))
+            except Exception as e:
+                result = f"Error running tool {call.name}: {e}"
         if on_event:
-            on_event("tool_result", {"name": name, "result": result})
+            on_event("tool_result", {"id": call.id, "name": call.name, "result": result})
         return result
 
 
