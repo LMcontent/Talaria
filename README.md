@@ -96,7 +96,7 @@ every single request instead of reusing one, which should avoid this. If
 you still hit it, it's your local network/antivirus actively interfering,
 not something to fix in `.env`.
 
-One-time browser setup (needed for the `browser_fetch` tool):
+One-time browser setup (needed for the `browser_open`/`browser_click`/... tools):
 
 ```bash
 playwright install chromium
@@ -616,8 +616,8 @@ too, including its RISKY-verdict branch.
 
 ### Tools available to the agent
 
-- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript.
-- `browser_fetch` — open a URL in a real headless Chromium (via Playwright) that executes JavaScript, for sites where `web_fetch` returns empty/garbled content. Slower, and **not a guaranteed bypass** for sites with strong anti-bot protection (e.g. Ozon) — they can still block or serve a challenge page to a headless browser.
+- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript or interact with a page.
+- `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, and sites behind a login. See "Browsing like a human — interactive sessions and logins" below.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
@@ -625,6 +625,52 @@ too, including its RISKY-verdict branch.
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 - `run_procedure` — run a bounded, repetitive tool-calling procedure as a compact state machine instead of a growing conversation, see below
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
+
+### Browsing like a human — interactive sessions and logins
+
+`web_search`/`web_fetch` cover plain pages fast, but a real chunk of the
+web isn't reachable that way: JS-rendered content, a search box you need
+to type into and submit, a multi-click flow, or anything gated behind a
+login. The browser tools close that gap by giving the agent an actual
+Chromium session instead of a one-shot page fetch:
+
+- `browser_open(url)` navigates and returns the page's visible text plus a
+  numbered list of clickable/fillable elements (a "set of marks", since
+  the model doesn't see pixels) — e.g. `[3] button 'Add to cart'`.
+- `browser_click(ref)` / `browser_type(ref, text, submit=)` act on an
+  element by that index, then return a fresh snapshot (indices can shift
+  between actions — always use the latest one).
+- `browser_scroll`, `browser_back`, `browser_state` (re-show the current
+  snapshot without navigating) round out normal browsing.
+- `browser_screenshot` saves a PNG under `WORKSPACE_DIR/screenshots/` and
+  hands back the markdown to show it inline in the web UI — for when the
+  text/element snapshot alone doesn't tell you enough (layout, a chart, a
+  CAPTCHA).
+
+**Login persistence is the actual point.** Cookies and localStorage are
+saved to `WORKSPACE_DIR/.browser_state.json` after every action and
+reloaded the next time a page opens for that workspace — including across
+process restarts, the same as a human's own browser stays logged in
+between sessions. The agent still can't type a password, click through
+2FA, or solve a CAPTCHA on its own — nothing here changes that — but a
+**human** can do that part once: set `BROWSER_HEADLESS=false` in `.env` on
+a desktop machine, have the agent (or a one-off script) call
+`browser_open` on the site's login page, then finish logging in yourself
+in the real window that pops up. From then on, headless or not, every
+`browser_open` for that site reuses the saved session automatically until
+it expires — the gap between "sites a human can use" and "sites the agent
+can use" becomes mostly a one-time bootstrap per site, not a permanent
+wall.
+
+Not a bypass for strong anti-bot protection — a site that challenges
+headless Chromium specifically can still block or serve a challenge page,
+login or not.
+
+`browser_click`/`browser_type` are excluded from cron jobs and autonomous
+mode (same reasoning as `run_python`: acting on a real, possibly
+logged-in session with nobody watching could submit a form, send a
+message, or spend money) — the read-only tools (`browser_open` and the
+rest) stay available there, same as `web_fetch` always has been.
 
 ### Long, repetitive procedures
 
