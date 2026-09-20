@@ -24,6 +24,15 @@ browser_state, or the snapshot any of these tools returns after acting).
 The list is rebuilt after every action, so indices can change between
 calls — always act on the index from the *latest* snapshot, not a
 remembered one from several actions ago.
+
+Some pages never put the data you actually want (price, stock, rating...)
+into the rendered text at all — a storefront's price often only exists in
+a JSON response its JavaScript fetched from an internal API, not in the
+page's own HTML/DOM. browser_network_log is the DevTools-Network-tab
+equivalent for that: every XHR/fetch call the page made since the last
+browser_open, with a preview of JSON/text response bodies, so the model
+can spot the actual pricing endpoint and call it directly (via web_fetch
+or run_python) instead of trying to scrape it out of rendered text.
 """
 
 import atexit
@@ -43,6 +52,9 @@ _USER_AGENT = (
 _INTERACTIVE_SELECTOR = (
     "a[href], button, input, textarea, select, [role=button], [role=link], [onclick]"
 )
+_NETWORK_RESOURCE_TYPES = ("xhr", "fetch")
+_MAX_NETWORK_ENTRIES = 200
+_MAX_BODY_PREVIEW = 800
 
 _playwright = None
 _browser = None
@@ -51,6 +63,7 @@ _context = None
 _page = None
 _context_key = None  # (workspace_dir, headless) the current _context was built for
 _elements: list = []
+_network_log: list = []
 
 
 def _state_path(workspace_dir: str) -> str:
@@ -104,9 +117,46 @@ def _ensure_page(workspace_dir: str, headless: bool):
             viewport={"width": 1280, "height": 900},
         )
         _page = _context.new_page()
+        _page.on("response", _on_response)
         _context_key = key
         _elements = []
     return _page
+
+
+def _on_response(response) -> None:
+    """Records every XHR/fetch response the page makes, so
+    browser_network_log can show the model what API calls actually
+    happened — including ones whose data never makes it into the rendered
+    page text. Registered once per page (see _ensure_page); best-effort —
+    any failure here must never break navigation itself."""
+    try:
+        request = response.request
+        if request.resource_type not in _NETWORK_RESOURCE_TYPES:
+            return
+        content_type = ""
+        try:
+            content_type = response.headers.get("content-type", "")
+        except Exception:
+            pass
+        entry = {
+            "method": request.method,
+            "url": response.url,
+            "status": response.status,
+            "content_type": content_type,
+        }
+        if "json" in content_type or "text" in content_type:
+            try:
+                body = response.text()
+                if len(body) > _MAX_BODY_PREVIEW:
+                    body = body[:_MAX_BODY_PREVIEW] + f"... [truncated, {len(body)} chars total]"
+                entry["body_preview"] = body
+            except Exception:
+                pass
+        _network_log.append(entry)
+        if len(_network_log) > _MAX_NETWORK_ENTRIES:
+            del _network_log[: len(_network_log) - _MAX_NETWORK_ENTRIES]
+    except Exception:
+        pass
 
 
 def _save_state(workspace_dir: str) -> None:
@@ -229,7 +279,7 @@ def _no_page_open() -> str:
 
 
 def browser_open(workspace_dir: str, url: str, headless: bool, wait_ms: int = 1000) -> str:
-    global _elements
+    global _elements, _network_log
     try:
         page = _ensure_page(workspace_dir, headless)
     except Exception as e:
@@ -237,6 +287,10 @@ def browser_open(workspace_dir: str, url: str, headless: bool, wait_ms: int = 10
             f"Error: could not start the browser ({e}). "
             "Run 'playwright install chromium' once and try again."
         )
+    # Reset here, not on every click/type/scroll — so the log covers
+    # everything from this open through whatever actions follow it, until
+    # the next browser_open starts a new page.
+    _network_log = []
     try:
         page.goto(url, timeout=_NAV_TIMEOUT_MS, wait_until="domcontentloaded")
         page.wait_for_timeout(max(0, wait_ms))
@@ -356,6 +410,38 @@ def browser_screenshot(workspace_dir: str, headless: bool) -> str:
     )
 
 
+def browser_network_log(workspace_dir: str, headless: bool, contains: str = "") -> str:
+    if _page is None:
+        return _no_page_open()
+    _ensure_page(workspace_dir, headless)  # no-op if already current; keeps state consistent
+    needle = str(contains).strip().lower()
+    entries = _network_log
+    if needle:
+        entries = [
+            e for e in entries
+            if needle in e["url"].lower() or needle in e.get("body_preview", "").lower()
+        ]
+    if not entries:
+        return (
+            "(no matching XHR/fetch calls captured since the last browser_open)"
+            if needle else
+            "(no XHR/fetch calls captured since the last browser_open — the page may load its "
+            "data server-side, or you may need to browser_click/browser_scroll to trigger it)"
+        )
+
+    lines = []
+    for e in entries:
+        lines.append(f"[{e['method']} {e['status']}] {e['url']}")
+        if e.get("content_type"):
+            lines.append(f"  content-type: {e['content_type']}")
+        if e.get("body_preview"):
+            lines.append(f"  body: {e['body_preview']}")
+    text = "\n".join(lines)
+    if len(text) > _MAX_TEXT_CHARS * 2:
+        text = text[: _MAX_TEXT_CHARS * 2] + f"... [truncated, {len(text)} chars total — narrow with `contains`]"
+    return text
+
+
 def _truthy(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -469,5 +555,30 @@ def make_browser_tools(workspace_dir: str, headless: bool = True) -> list[ToolSp
             ),
             input_schema={"type": "object", "properties": {}, "required": []},
             handler=lambda: browser_screenshot(workspace_dir, headless),
+        ),
+        ToolSpec(
+            name="browser_network_log",
+            description=(
+                "List the XHR/fetch API calls the current page made (since the last "
+                "browser_open), with a preview of JSON/text response bodies — the "
+                "DevTools Network tab equivalent. Use this when data you need (price, "
+                "stock, rating...) doesn't show up in browser_open's visible text: "
+                "many sites load it from a separate API call rather than putting it "
+                "in the page's own HTML. Once you spot the right URL here, call it "
+                "directly with web_fetch (or run_python, if it needs a POST/headers) "
+                "instead of re-rendering the whole page every time you need it again. "
+                "Optionally filter with `contains` (matched against the URL and body)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "contains": {
+                        "type": "string",
+                        "description": "Optional substring to filter by (e.g. 'price', 'api/product').",
+                    }
+                },
+                "required": [],
+            },
+            handler=lambda contains="": browser_network_log(workspace_dir, headless, contains),
         ),
     ]
