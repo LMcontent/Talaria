@@ -616,7 +616,7 @@ too, including its RISKY-verdict branch.
 
 ### Tools available to the agent
 
-- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript or interact with a page.
+- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed by default, uses DuckDuckGo HTML; optionally Google's Custom Search API instead, see `GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`). Fast, but can't run JavaScript or interact with a page.
 - `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human — interactive sessions and logins" below.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
@@ -710,7 +710,21 @@ similar are known for this) are the most likely to hit it. If the block is
 only on the fully-rendered page, `browser_network_log` is sometimes still
 worth a look — an internal API call can occasionally get through even when
 the page itself is challenged — but there's no general fix beyond that
-short of the site not flagging headless Chromium in the first place.
+short of the site not flagging headless Chromium in the first place. This
+is a deliberate line: proxy/IP rotation and CAPTCHA-solving to push
+through that kind of block are out of scope for this project.
+
+**When a specific page is blocked, search for it instead of retrying it.**
+A search engine has usually already indexed the page — its title, meta
+description, and often a price for a product page — so the answer can
+show up directly in a search result snippet without ever touching the
+blocked site. `web_search`'s description already tells the model to try
+this before giving up on a 403'd page. By default it scrapes DuckDuckGo's
+HTML results (no setup needed); set `GOOGLE_SEARCH_API_KEY` and
+`GOOGLE_SEARCH_CX` in `.env` to use Google's official Custom Search JSON
+API instead — generally richer, more reliable snippets, a sanctioned API
+rather than a scrape, and a free tier of 100 queries/day (see the comment
+above those two lines in `.env.example` for setup steps).
 
 ### Recovering from a stuck or crashed browser session
 

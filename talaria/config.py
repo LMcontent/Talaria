@@ -46,6 +46,9 @@ class Config:
 
     browser_headless: bool = True
 
+    google_search_api_key: str | None = None
+    google_search_cx: str | None = None
+
 
 def _parse_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
@@ -98,4 +101,6 @@ def load_config() -> Config:
         autonomous_mode=_parse_bool(os.environ.get("AUTONOMOUS_MODE", "false")),
         autonomous_interval_minutes=float(os.environ.get("AUTONOMOUS_INTERVAL_MINUTES", "60")),
         browser_headless=_parse_bool(os.environ.get("BROWSER_HEADLESS", "true")),
+        google_search_api_key=os.environ.get("GOOGLE_SEARCH_API_KEY"),
+        google_search_cx=os.environ.get("GOOGLE_SEARCH_CX"),
     )

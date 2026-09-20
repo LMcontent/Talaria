@@ -17,10 +17,60 @@ _HEADERS = {
 }
 _TIMEOUT = 10
 _MAX_CHARS = 6000
+_GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
 
-def web_search(query: str, max_results: int = 5) -> str:
-    """Search the web via DuckDuckGo's HTML endpoint (no API key required)."""
+def web_search(
+    query: str,
+    max_results: int = 5,
+    google_api_key: str | None = None,
+    google_cx: str | None = None,
+) -> str:
+    """Search the web. Uses Google's official Custom Search JSON API when
+    both google_api_key and google_cx are configured (see
+    make_web_tools/talaria/config.py) — generally richer, more reliable
+    snippets than scraping, and a sanctioned API rather than a scrape.
+    Falls back to DuckDuckGo's HTML endpoint otherwise (no key needed, but
+    thinner snippets).
+
+    Worth trying before giving up on a page that came back blocked/403
+    (browser_open, web_fetch): a search engine has often already indexed
+    the page's price/title/description, so the answer can show up in the
+    result snippet directly, without needing to fetch the blocked page at
+    all.
+    """
+    if google_api_key and google_cx:
+        return _web_search_google(query, max_results, google_api_key, google_cx)
+    return _web_search_duckduckgo(query, max_results)
+
+
+def _web_search_google(query: str, max_results: int, api_key: str, cx: str) -> str:
+    try:
+        resp = requests.get(
+            _GOOGLE_CSE_URL,
+            params={"key": api_key, "cx": cx, "q": query, "num": max(1, min(max_results, 10))},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        return f"Error: Google search failed ({e})"
+    except ValueError as e:
+        return f"Error: Google search returned an unreadable response ({e})"
+
+    items = data.get("items") or []
+    if not items:
+        return "No results found."
+    results = []
+    for item in items[: max(1, min(max_results, 10))]:
+        title = item.get("title", "")
+        link = item.get("link", "")
+        snippet = " ".join((item.get("snippet") or "").split())
+        results.append(f"- {title}\n  {link}\n  {snippet}")
+    return "\n".join(results)
+
+
+def _web_search_duckduckgo(query: str, max_results: int) -> str:
     try:
         resp = requests.get(
             "https://html.duckduckgo.com/html/",
@@ -67,31 +117,42 @@ def web_fetch(url: str) -> str:
     return text or "(page had no extractable text)"
 
 
-WEB_TOOLS = [
-    ToolSpec(
-        name="web_search",
-        description="Search the internet and return a list of matching page titles, URLs and snippets.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query."},
-                "max_results": {
-                    "type": "integer",
-                    "description": "Max results to return (default 5, max 10).",
+def make_web_tools(google_search_api_key: str | None = None, google_search_cx: str | None = None) -> list[ToolSpec]:
+    return [
+        ToolSpec(
+            name="web_search",
+            description=(
+                "Search the internet and return a list of matching page titles, "
+                "URLs and snippets. If a specific page came back blocked/403 or "
+                "empty (browser_open, web_fetch), try this before giving up: "
+                "search for the product/topic name (e.g. add 'цена'/'price') — "
+                "a search engine has often already indexed the page, so the "
+                "answer can show up directly in the result snippet without "
+                "needing to fetch the blocked page at all."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query."},
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max results to return (default 5, max 10).",
+                    },
                 },
+                "required": ["query"],
             },
-            "required": ["query"],
-        },
-        handler=lambda query, max_results=5: web_search(query, max_results),
-    ),
-    ToolSpec(
-        name="web_fetch",
-        description="Fetch a web page by URL and return its extracted text content.",
-        input_schema={
-            "type": "object",
-            "properties": {"url": {"type": "string", "description": "URL to fetch."}},
-            "required": ["url"],
-        },
-        handler=lambda url: web_fetch(url),
-    ),
-]
+            handler=lambda query, max_results=5: web_search(
+                query, max_results, google_search_api_key, google_search_cx
+            ),
+        ),
+        ToolSpec(
+            name="web_fetch",
+            description="Fetch a web page by URL and return its extracted text content.",
+            input_schema={
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "URL to fetch."}},
+                "required": ["url"],
+            },
+            handler=lambda url: web_fetch(url),
+        ),
+    ]
