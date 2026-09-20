@@ -617,7 +617,7 @@ too, including its RISKY-verdict branch.
 ### Tools available to the agent
 
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript or interact with a page.
-- `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, and sites behind a login. See "Browsing like a human — interactive sessions and logins" below.
+- `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human — interactive sessions and logins" below.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
@@ -646,6 +646,21 @@ Chromium session instead of a one-shot page fetch:
   hands back the markdown to show it inline in the web UI — for when the
   text/element snapshot alone doesn't tell you enough (layout, a chart, a
   CAPTCHA).
+
+**Some data never shows up in the rendered text at all.** A storefront's
+price, stock level, or rating is very often loaded by a separate API call
+the page's own JavaScript makes after loading — not present in the
+page's HTML at all, so `browser_open`'s visible-text snapshot can come up
+empty even though a human looking at the same page sees a price right
+there. `browser_network_log` is the DevTools-Network-tab equivalent for
+this: it lists every XHR/fetch call the page made since the last
+`browser_open`, with a preview of any JSON/text response body, so the
+agent can spot the actual API endpoint (e.g. `/api/price?sku=...`
+returning `{"price": 12990, ...}`) and call it directly — with `web_fetch`
+for a plain GET, or `run_python` if it needs a POST/custom headers —
+instead of trying to re-render and scrape the whole page every time.
+Optionally filter results with `contains` (matched against the URL and
+body) once you know roughly what you're looking for.
 
 **Login persistence is the actual point.** Cookies and localStorage are
 saved to `WORKSPACE_DIR/.browser_state.json` after every action and

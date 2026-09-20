@@ -1,15 +1,22 @@
 import functools
 import http.server
+import mimetypes
 import os
 import re
 import threading
 
 import pytest
 
+# Some platforms don't map .json -> application/json by default in
+# mimetypes, which the network-log tests rely on to prove the captured
+# response really was JSON (matching a real API's Content-Type header).
+mimetypes.add_type("application/json", ".json")
+
 from talaria.tools import browser as browser_mod
 from talaria.tools.browser import (
     browser_back,
     browser_click,
+    browser_network_log,
     browser_open,
     browser_screenshot,
     browser_scroll,
@@ -81,6 +88,19 @@ _CHECK_LOGIN_PAGE = """<!doctype html><html><body>
 <script>
 document.getElementById('cookie-status').innerText =
   document.cookie.includes('session=abc123') ? 'LOGGED IN' : 'NOT LOGGED IN';
+</script>
+</body></html>"""
+
+# Simulates the real-world case this tool exists for: a storefront whose
+# price is never in the page's own HTML at all, only in a JSON response
+# its JavaScript fetches from an internal API afterwards.
+_PRICE_PAGE = """<!doctype html><html><body>
+<h1>Product X</h1>
+<div id="price">Loading price...</div>
+<script>
+fetch('/api/price.json').then(r => r.json()).then(function(data) {
+  document.getElementById('price').innerText = 'Price: ' + data.price + ' RUB';
+});
 </script>
 </body></html>"""
 
@@ -247,6 +267,61 @@ def test_login_session_persists_across_a_simulated_restart(site, tmp_path):
     assert "NOT LOGGED IN" not in result
 
 
+def test_browser_network_log_captures_the_api_call_behind_async_data(site, tmp_path):
+    # The real-world motivating case: a price that only exists in a JSON
+    # API response, never in the page's own rendered text.
+    base, directory = site
+    api_dir = directory / "api"
+    api_dir.mkdir()
+    (api_dir / "price.json").write_text('{"price": 12990, "currency": "RUB"}', encoding="utf-8")
+    _write(directory, "product.html", _PRICE_PAGE)
+    ws = str(tmp_path)
+
+    browser_open(ws, f"{base}/product.html", True)
+    log = browser_network_log(ws, True)
+
+    assert "api/price.json" in log
+    assert "12990" in log
+    assert "application/json" in log
+
+
+def test_browser_network_log_contains_filter_narrows_results(site, tmp_path):
+    base, directory = site
+    api_dir = directory / "api"
+    api_dir.mkdir()
+    (api_dir / "price.json").write_text('{"price": 12990}', encoding="utf-8")
+    _write(directory, "product.html", _PRICE_PAGE)
+    ws = str(tmp_path)
+
+    browser_open(ws, f"{base}/product.html", True)
+
+    assert "price.json" in browser_network_log(ws, True, "price")
+    assert "no matching" in browser_network_log(ws, True, "does-not-exist")
+
+
+def test_browser_network_log_resets_on_each_new_open(site, tmp_path):
+    base, directory = site
+    api_dir = directory / "api"
+    api_dir.mkdir()
+    (api_dir / "price.json").write_text('{"price": 12990}', encoding="utf-8")
+    _write(directory, "product.html", _PRICE_PAGE)
+    _write(directory, "index.html", _PAGE_ONE)
+    ws = str(tmp_path)
+
+    browser_open(ws, f"{base}/product.html", True)
+    assert "price.json" in browser_network_log(ws, True)
+
+    # A plain page with no fetch/XHR calls — the previous page's captured
+    # traffic must not still be sitting in the log.
+    browser_open(ws, f"{base}/index.html", True)
+    assert "price.json" not in browser_network_log(ws, True)
+
+
+def test_browser_network_log_before_any_open_reports_a_clear_error(tmp_path):
+    browser_mod._page = None
+    assert "call browser_open" in browser_network_log(str(tmp_path), True)
+
+
 def test_make_browser_tools_names(tmp_path):
     names = {t.name for t in make_browser_tools(str(tmp_path))}
     assert names == {
@@ -257,4 +332,5 @@ def test_make_browser_tools_names(tmp_path):
         "browser_back",
         "browser_state",
         "browser_screenshot",
+        "browser_network_log",
     }
