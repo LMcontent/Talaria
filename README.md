@@ -646,6 +646,19 @@ Chromium session instead of a one-shot page fetch:
   hands back the markdown to show it inline in the web UI — for when the
   text/element snapshot alone doesn't tell you enough (layout, a chart, a
   CAPTCHA).
+- `browser_reset` force-closes the current session so the next
+  `browser_open` starts completely fresh (still reusing any saved login).
+  Rarely needed by hand — see "Recovering from a stuck or crashed browser
+  session" below — but there when a page seems permanently stuck rather
+  than actually crashed.
+
+**A lot of "the agent can't find the price" turns out to be "the page has
+a dialog in the way."** Many storefronts show a region/city-selection or
+cookie-consent popup before the real page content, and if it's still up,
+`browser_open`'s visible text can look empty or incomplete even though the
+price is right there once it's dismissed. Check the numbered element list
+for something like `[2] button 'Moscow'` or `[1] button 'Accept'` and
+`browser_click` it before concluding the data isn't there.
 
 **Some data never shows up in the rendered text at all.** A storefront's
 price, stock level, or rating is very often loaded by a separate API call
@@ -678,8 +691,28 @@ can use" becomes mostly a one-time bootstrap per site, not a permanent
 wall.
 
 Not a bypass for strong anti-bot protection — a site that challenges
-headless Chromium specifically can still block or serve a challenge page,
-login or not.
+headless Chromium specifically can still block (often a 403, or a redirect
+to a "confirm you're human" page) whether or not you're logged in.
+Marketplaces with aggressive bot detection (Ozon, VseInstrumenti, and
+similar are known for this) are the most likely to hit it. If the block is
+only on the fully-rendered page, `browser_network_log` is sometimes still
+worth a look — an internal API call can occasionally get through even when
+the page itself is challenged — but there's no general fix beyond that
+short of the site not flagging headless Chromium in the first place.
+
+### Recovering from a stuck or crashed browser session
+
+The module keeps exactly one browser/context/page open at a time. If the
+underlying Chromium process dies (killed for memory, crashed on a
+particularly hostile page), every `browser_*` call would otherwise keep
+failing with a connection error until the whole Talaria process restarted
+— `browser_open` detects that automatically (checked at the start of every
+call) and transparently rebuilds a fresh session, retrying once itself if
+the crash happens mid-navigation, so a single bad page doesn't require any
+manual intervention. `browser_reset` is there for what that can't fix on
+its own: a page that's genuinely stuck rather than actually crashed (a
+hung dialog, an infinite redirect), or a site that keeps failing the same
+way across several `browser_open` retries.
 
 `browser_click`/`browser_type` are excluded from cron jobs and autonomous
 mode (same reasoning as `run_python`: acting on a real, possibly

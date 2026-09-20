@@ -33,6 +33,17 @@ equivalent for that: every XHR/fetch call the page made since the last
 browser_open, with a preview of JSON/text response bodies, so the model
 can spot the actual pricing endpoint and call it directly (via web_fetch
 or run_python) instead of trying to scrape it out of rendered text.
+
+The whole module holds exactly one browser/context/page at a time (see
+the module-level state below) — simple, and good enough for one agent
+browsing one thing at a time, but it means a crashed Chromium process
+(killed for memory, a page that wedges the renderer, ...) would otherwise
+break every subsequent browser_* call until the whole Talaria process
+restarted. _ensure_page checks the cached browser/page are still alive on
+every call and transparently rebuilds them if not; browser_open also
+retries once against a freshly rebuilt session if the crash happens
+mid-navigation. browser_reset is the explicit manual lever for anything
+that isn't a crash (a genuinely stuck page) or that keeps recurring.
 """
 
 import atexit
@@ -78,9 +89,23 @@ def _ensure_page(workspace_dir: str, headless: bool):
     if _playwright is None:
         _playwright = sync_playwright().start()
 
-    if _browser is None or _browser_headless != headless:
+    # Self-healing: a crashed Chromium process (out of memory, killed by
+    # the OS, a site that wedges the renderer) leaves _browser/_context/
+    # _page pointing at dead objects — every call would otherwise keep
+    # failing with a connection error until the whole Talaria process
+    # restarts. Detect that here and rebuild from scratch instead of
+    # trusting the cached objects are still good.
+    try:
+        browser_dead = _browser is not None and not _browser.is_connected()
+    except Exception:
+        browser_dead = True
+
+    if _browser is None or _browser_headless != headless or browser_dead:
         if _browser is not None:
-            _browser.close()
+            try:
+                _browser.close()
+            except Exception:
+                pass
         launch_kwargs = {"headless": headless, "args": ["--disable-blink-features=AutomationControlled"]}
         # A pre-installed Chromium (e.g. this repo's own dev sandbox) may
         # live outside Playwright's own version-pinned browsers.json
@@ -105,10 +130,18 @@ def _ensure_page(workspace_dir: str, headless: bool):
         _browser_headless = headless
         _context = None  # force a fresh context under the new browser
 
+    try:
+        page_dead = _page is not None and _page.is_closed()
+    except Exception:
+        page_dead = True
+
     key = (os.path.abspath(workspace_dir), headless)
-    if _context is None or _context_key != key:
+    if _context is None or _context_key != key or page_dead:
         if _context is not None:
-            _context.close()
+            try:
+                _context.close()
+            except Exception:
+                pass
         state_path = _state_path(workspace_dir)
         storage_state = state_path if os.path.isfile(state_path) else None
         _context = _browser.new_context(
@@ -166,6 +199,54 @@ def _save_state(workspace_dir: str) -> None:
             _context.storage_state(path=_state_path(workspace_dir))
         except Exception:
             pass  # best-effort — a failed save just means the next open re-logs in
+
+
+_CONNECTION_ERROR_HINTS = (
+    "has been closed",
+    "Target closed",
+    "Connection closed",
+    "Browser closed",
+    "Target page, context or browser has been closed",
+)
+
+
+def _is_connection_error(e: Exception) -> bool:
+    msg = str(e)
+    return any(hint in msg for hint in _CONNECTION_ERROR_HINTS)
+
+
+def _reset_hint(e: Exception) -> str:
+    return " (try browser_reset if this keeps happening)" if _is_connection_error(e) else ""
+
+
+def _force_reset() -> str:
+    """Tears down the whole browser/context/page and clears every bit of
+    module state, so the next call starts completely fresh. _ensure_page
+    already self-heals from a crashed browser on its own (see its
+    is_connected()/is_closed() checks) — this is the explicit lever for
+    when that isn't enough: a page that's technically still alive but
+    stuck (an infinite redirect, a hung dialog, a wedged render), or just
+    to force a clean slate after a string of failures."""
+    global _playwright, _browser, _browser_headless, _context, _page
+    global _context_key, _elements, _network_log
+    for closer in (
+        lambda: _context.close() if _context is not None else None,
+        lambda: _browser.close() if _browser is not None else None,
+        lambda: _playwright.stop() if _playwright is not None else None,
+    ):
+        try:
+            closer()
+        except Exception:
+            pass
+    _playwright = None
+    _browser = None
+    _browser_headless = None
+    _context = None
+    _page = None
+    _context_key = None
+    _elements = []
+    _network_log = []
+    return "Browser session reset. The next browser_open will start a completely fresh session (still reusing any saved login from .browser_state.json)."
 
 
 def _cleanup() -> None:
@@ -278,7 +359,7 @@ def _no_page_open() -> str:
     return "Error: no page open yet — call browser_open(url) first."
 
 
-def browser_open(workspace_dir: str, url: str, headless: bool, wait_ms: int = 1000) -> str:
+def browser_open(workspace_dir: str, url: str, headless: bool, wait_ms: int = 1000, _retried: bool = False) -> str:
     global _elements, _network_log
     try:
         page = _ensure_page(workspace_dir, headless)
@@ -295,7 +376,16 @@ def browser_open(workspace_dir: str, url: str, headless: bool, wait_ms: int = 10
         page.goto(url, timeout=_NAV_TIMEOUT_MS, wait_until="domcontentloaded")
         page.wait_for_timeout(max(0, wait_ms))
     except Exception as e:
-        return f"Error: browser_open failed for {url} ({e})"
+        # A browser that died mid-call (crashed, killed for memory, ...)
+        # surfaces here rather than at the top of _ensure_page, since it
+        # looked alive when this call started — one automatic retry against
+        # a freshly rebuilt session covers that case without bothering the
+        # model with it; a second failure is treated as the site/URL itself,
+        # not the browser.
+        if _is_connection_error(e) and not _retried:
+            _force_reset()
+            return browser_open(workspace_dir, url, headless, wait_ms, _retried=True)
+        return f"Error: browser_open failed for {url} ({e}){_reset_hint(e)}"
     summary, _elements = _snapshot(page)
     _save_state(workspace_dir)
     return summary
@@ -327,7 +417,7 @@ def browser_click(workspace_dir: str, ref, headless: bool) -> str:
         page.wait_for_load_state("domcontentloaded", timeout=10000)
         page.wait_for_timeout(400)
     except Exception as e:
-        return f"Error: click on [{ref}] failed ({e})"
+        return f"Error: click on [{ref}] failed ({e}){_reset_hint(e)}"
     summary, _elements = _snapshot(page)
     _save_state(workspace_dir)
     return summary
@@ -356,7 +446,7 @@ def browser_type(workspace_dir: str, ref, text: str, submit: bool, headless: boo
                 page.wait_for_load_state("domcontentloaded", timeout=10000)
         page.wait_for_timeout(300)
     except Exception as e:
-        return f"Error: typing into [{ref}] failed ({e})"
+        return f"Error: typing into [{ref}] failed ({e}){_reset_hint(e)}"
     summary, _elements = _snapshot(page)
     _save_state(workspace_dir)
     return summary
@@ -372,7 +462,7 @@ def browser_scroll(workspace_dir: str, direction: str, headless: bool) -> str:
         page.mouse.wheel(0, delta)
         page.wait_for_timeout(400)
     except Exception as e:
-        return f"Error: scroll failed ({e})"
+        return f"Error: scroll failed ({e}){_reset_hint(e)}"
     summary, _elements = _snapshot(page)
     return summary
 
@@ -386,7 +476,7 @@ def browser_back(workspace_dir: str, headless: bool) -> str:
         page.go_back(timeout=10000)
         page.wait_for_timeout(300)
     except Exception as e:
-        return f"Error: back navigation failed ({e})"
+        return f"Error: back navigation failed ({e}){_reset_hint(e)}"
     summary, _elements = _snapshot(page)
     return summary
 
@@ -402,7 +492,7 @@ def browser_screenshot(workspace_dir: str, headless: bool) -> str:
     try:
         page.screenshot(path=path)
     except Exception as e:
-        return f"Error: screenshot failed ({e})"
+        return f"Error: screenshot failed ({e}){_reset_hint(e)}"
     rel = f"screenshots/{filename}"
     return (
         f"Saved a screenshot of the current page to {rel}. "
@@ -442,6 +532,10 @@ def browser_network_log(workspace_dir: str, headless: bool, contains: str = "") 
     return text
 
 
+def browser_reset() -> str:
+    return _force_reset()
+
+
 def _truthy(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -458,7 +552,12 @@ def make_browser_tools(workspace_dir: str, headless: bool = True) -> list[ToolSp
                 "for JS-heavy pages web_fetch can't render, or any site you're "
                 "logged into. Returns the page's visible text plus a numbered list "
                 "of clickable/fillable elements to act on next with browser_click "
-                "or browser_type."
+                "or browser_type. If the text looks incomplete or missing something "
+                "you expect (e.g. no price on a product page), check the element list "
+                "for a region/city-selection or cookie-consent dialog blocking the "
+                "real content and click through it before concluding the data isn't "
+                "there — many storefronts require that before showing a price. If it "
+                "still isn't in the text after that, try browser_network_log."
             ),
             input_schema={
                 "type": "object",
@@ -580,5 +679,19 @@ def make_browser_tools(workspace_dir: str, headless: bool = True) -> list[ToolSp
                 "required": [],
             },
             handler=lambda contains="": browser_network_log(workspace_dir, headless, contains),
+        ),
+        ToolSpec(
+            name="browser_reset",
+            description=(
+                "Force-close and forget the current browser session, so the next "
+                "browser_open starts completely fresh (still reusing any saved login "
+                "from .browser_state.json). The browser session already recovers "
+                "automatically from a crash on its own — use this when a page seems "
+                "permanently stuck (a hung dialog, an infinite redirect) rather than "
+                "actually crashed, or after repeated connection errors on the same "
+                "site that a plain browser_open retry didn't fix."
+            ),
+            input_schema={"type": "object", "properties": {}, "required": []},
+            handler=lambda: browser_reset(),
         ),
     ]

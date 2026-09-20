@@ -18,6 +18,7 @@ from talaria.tools.browser import (
     browser_click,
     browser_network_log,
     browser_open,
+    browser_reset,
     browser_screenshot,
     browser_scroll,
     browser_state,
@@ -267,6 +268,88 @@ def test_login_session_persists_across_a_simulated_restart(site, tmp_path):
     assert "NOT LOGGED IN" not in result
 
 
+def test_browser_reset_clears_state_and_next_open_still_works(site, tmp_path):
+    base, directory = site
+    _write(directory, "index.html", _PAGE_ONE)
+    ws = str(tmp_path)
+
+    browser_open(ws, f"{base}/index.html", True)
+    assert browser_mod._page is not None
+
+    result = browser_reset()
+
+    assert "reset" in result.lower()
+    assert browser_mod._page is None
+    assert browser_mod._browser is None
+    assert browser_mod._context is None
+
+    reopened = browser_open(ws, f"{base}/index.html", True)
+    assert "Hello World" in reopened
+
+
+def test_browser_open_recovers_from_a_crashed_browser_process(site, tmp_path):
+    # The scenario this whole mechanism exists for: Chromium dies
+    # underneath the module (killed for memory, crashed) between two
+    # calls — the next browser_open must self-heal instead of failing
+    # forever until the whole Talaria process restarts.
+    base, directory = site
+    _write(directory, "index.html", _PAGE_ONE)
+    ws = str(tmp_path)
+
+    browser_open(ws, f"{base}/index.html", True)
+    browser_mod._browser.close()
+    assert not browser_mod._browser.is_connected()
+
+    result = browser_open(ws, f"{base}/index.html", True)
+    assert "Hello World" in result
+
+
+def test_browser_open_recovers_from_a_closed_page(site, tmp_path):
+    # A narrower case than a whole crashed browser: just this page closed
+    # (e.g. the site's own JS called window.close()) while the browser
+    # process itself is still fine.
+    base, directory = site
+    _write(directory, "index.html", _PAGE_ONE)
+    ws = str(tmp_path)
+
+    browser_open(ws, f"{base}/index.html", True)
+    browser_mod._page.close()
+    assert browser_mod._page.is_closed()
+
+    result = browser_open(ws, f"{base}/index.html", True)
+    assert "Hello World" in result
+
+
+def test_browser_open_retries_once_after_a_connection_error_mid_navigation(site, tmp_path, monkeypatch):
+    # Different from the two tests above: here the crash happens *during*
+    # the call itself (page.goto raises), which _ensure_page's liveness
+    # check at the top of the *next* call can't have caught yet — this is
+    # what browser_open's own one-shot retry covers.
+    base, directory = site
+    _write(directory, "index.html", _PAGE_ONE)
+    ws = str(tmp_path)
+
+    real_ensure_page = browser_mod._ensure_page
+    calls = {"n": 0}
+
+    class FakePage:
+        def goto(self, *a, **k):
+            raise Exception("Target page, context or browser has been closed")
+
+    def fake_ensure_page(workspace_dir, headless):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return FakePage()
+        return real_ensure_page(workspace_dir, headless)
+
+    monkeypatch.setattr(browser_mod, "_ensure_page", fake_ensure_page)
+
+    result = browser_open(ws, f"{base}/index.html", True)
+
+    assert calls["n"] == 2
+    assert "Hello World" in result
+
+
 def test_browser_network_log_captures_the_api_call_behind_async_data(site, tmp_path):
     # The real-world motivating case: a price that only exists in a JSON
     # API response, never in the page's own rendered text.
@@ -333,4 +416,5 @@ def test_make_browser_tools_names(tmp_path):
         "browser_state",
         "browser_screenshot",
         "browser_network_log",
+        "browser_reset",
     }
