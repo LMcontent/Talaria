@@ -23,8 +23,16 @@ from talaria.workspace_log import append_log
 # Same rationale as talaria/autonomous.py: nobody is watching a cron job
 # fire, so it must never reach code execution, package installs, new-skill
 # approval, or the full unfiltered tool set delegate_task/run_procedure
-# would otherwise hand back out.
-EXCLUDED_TOOLS = {"run_python", "install_package", "propose_skill", "delegate_task", "run_procedure"}
+# would otherwise hand back out. browser_click/browser_type are excluded
+# for the same reason — clicking/typing on a real, possibly-logged-in
+# browser session can submit forms, send messages, or spend money, and
+# nobody's watching to catch a mistake. Read-only browsing (browser_open/
+# browser_state/browser_scroll/browser_back/browser_screenshot) is fine,
+# same as web_fetch always having been.
+EXCLUDED_TOOLS = {
+    "run_python", "install_package", "propose_skill", "delegate_task", "run_procedure",
+    "browser_click", "browser_type",
+}
 
 _CHECK_INTERVAL_SECONDS = 30
 _LOG_FILENAME = ".cron_log.json"

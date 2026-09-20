@@ -3,11 +3,22 @@ hits a real network/API, so tests exercise Talaria's own logic (agent loop,
 history handling, skill gating, web endpoints) deterministically and fast.
 """
 
+import os
 import threading
 
 import pytest
 
 from talaria.providers.base import Provider, ProviderResponse
+
+# Some dev/CI sandboxes pre-install Chromium outside Playwright's own
+# version-pinned registry (see talaria/tools/browser.py's
+# PLAYWRIGHT_CHROMIUM_EXECUTABLE support) — point at it automatically here
+# if present and nothing more specific was already set, so `pytest` for
+# tests/test_browser.py works out of the box in such a sandbox without
+# every dev needing to know this env var exists. A no-op on a normal
+# machine that just ran `playwright install chromium` (no /opt/pw-browsers).
+if "PLAYWRIGHT_CHROMIUM_EXECUTABLE" not in os.environ and os.path.exists("/opt/pw-browsers/chromium"):
+    os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] = "/opt/pw-browsers/chromium"
 
 
 class ScriptedProvider(Provider):

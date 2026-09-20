@@ -40,8 +40,16 @@ from talaria.workspace_log import append_log
 # run_procedure's internal loop — both are built from this agent's own
 # tool list *before* filtering, so excluding them here is the only way to
 # keep an unattended run from reaching run_python etc. through them) —
-# never available on an unattended run.
-EXCLUDED_TOOLS = {"run_python", "install_package", "propose_skill", "delegate_task", "run_procedure"}
+# never available on an unattended run. browser_click/browser_type are
+# excluded too: they can act on a real, possibly-logged-in browser session
+# (submit a form, send a message, spend money) with nobody watching to
+# catch a mistake. Read-only browsing (browser_open/browser_state/
+# browser_scroll/browser_back/browser_screenshot) stays available, same as
+# web_fetch always has been.
+EXCLUDED_TOOLS = {
+    "run_python", "install_package", "propose_skill", "delegate_task", "run_procedure",
+    "browser_click", "browser_type",
+}
 
 PROMPT_TEMPLATE = (
     "This is an unattended autonomous check-in — nobody is watching, so "

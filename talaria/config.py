@@ -44,6 +44,8 @@ class Config:
     token_price_input_per_m: float = 0.0
     token_price_output_per_m: float = 0.0
 
+    browser_headless: bool = True
+
 
 def _parse_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
@@ -95,4 +97,5 @@ def load_config() -> Config:
         max_delegate_depth=int(os.environ.get("MAX_DELEGATE_DEPTH", "3")),
         autonomous_mode=_parse_bool(os.environ.get("AUTONOMOUS_MODE", "false")),
         autonomous_interval_minutes=float(os.environ.get("AUTONOMOUS_INTERVAL_MINUTES", "60")),
+        browser_headless=_parse_bool(os.environ.get("BROWSER_HEADLESS", "true")),
     )

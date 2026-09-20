@@ -1,7 +1,7 @@
 from talaria.config import Config
 from talaria.providers.base import Provider, ToolSpec
 from talaria.skills import load_skills
-from talaria.tools.browser import BROWSER_TOOLS
+from talaria.tools.browser import make_browser_tools
 from talaria.tools.checkpoint import make_checkpoint_tools
 from talaria.tools.code_exec import Confirmation, make_code_tool, make_install_package_tool
 from talaria.tools.cron import make_cron_tools
@@ -29,7 +29,7 @@ def build_tools(
 
     tools = [
         *WEB_TOOLS,
-        *BROWSER_TOOLS,
+        *make_browser_tools(config.workspace_dir, config.browser_headless),
         *make_document_tools(config.workspace_dir),
         make_code_tool(config.workspace_dir, confirm),
         make_install_package_tool(config.workspace_dir, confirm),
