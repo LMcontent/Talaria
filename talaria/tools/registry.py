@@ -10,7 +10,7 @@ from talaria.tools.documents import make_document_tools
 from talaria.tools.goals import make_goal_tools
 from talaria.tools.memory_tools import make_memory_tools
 from talaria.tools.procedure import make_procedure_tool
-from talaria.tools.web import WEB_TOOLS
+from talaria.tools.web import make_web_tools
 from talaria.usage import UsageTracker
 
 
@@ -28,7 +28,7 @@ def build_tools(
     confirm = config.confirm_code_exec if confirm_code_exec is None else confirm_code_exec
 
     tools = [
-        *WEB_TOOLS,
+        *make_web_tools(config.google_search_api_key, config.google_search_cx),
         *make_browser_tools(config.workspace_dir, config.browser_headless),
         *make_document_tools(config.workspace_dir),
         make_code_tool(config.workspace_dir, confirm),

@@ -616,7 +616,7 @@ too, including its RISKY-verdict branch.
 
 ### Tools available to the agent
 
-- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed, uses DuckDuckGo HTML). Fast, but can't run JavaScript or interact with a page.
+- `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed by default, uses DuckDuckGo HTML; optionally Google's Custom Search API instead, see `GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`). Fast, but can't run JavaScript or interact with a page.
 - `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human — interactive sessions and logins" below.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
@@ -631,8 +631,20 @@ too, including its RISKY-verdict branch.
 `web_search`/`web_fetch` cover plain pages fast, but a real chunk of the
 web isn't reachable that way: JS-rendered content, a search box you need
 to type into and submit, a multi-click flow, or anything gated behind a
-login. The browser tools close that gap by giving the agent an actual
-Chromium session instead of a one-shot page fetch:
+login. Both `web_fetch` and the browser tools present as an ordinary
+desktop Chrome — a real User-Agent (not a self-identifying one; an earlier
+version literally sent `"Talaria/0.1"`, which announced itself as a bot to
+any site that looked), and `browser_open`'s Chromium session additionally
+sets a real locale/timezone (`BROWSER_LOCALE`/`BROWSER_TIMEZONE` in
+`.env`, default `ru-RU`/`Europe/Moscow`) and patches `navigator.webdriver`
+back to `undefined`, instead of leaving the blanks and automation
+signals a default headless launch leaves in place. None of this defeats
+an actual bot-detection *system* (TLS/HTTP2 fingerprinting, a JS
+challenge, IP reputation are all untouched) — it just stops the browser
+from gratuitously giving itself away through basics a real visitor's
+browser wouldn't leave blank. The browser tools close the remaining gap
+by giving the agent an actual Chromium session instead of a one-shot page
+fetch:
 
 - `browser_open(url)` navigates and returns the page's visible text plus a
   numbered list of clickable/fillable elements (a "set of marks", since
@@ -646,6 +658,19 @@ Chromium session instead of a one-shot page fetch:
   hands back the markdown to show it inline in the web UI — for when the
   text/element snapshot alone doesn't tell you enough (layout, a chart, a
   CAPTCHA).
+- `browser_reset` force-closes the current session so the next
+  `browser_open` starts completely fresh (still reusing any saved login).
+  Rarely needed by hand — see "Recovering from a stuck or crashed browser
+  session" below — but there when a page seems permanently stuck rather
+  than actually crashed.
+
+**A lot of "the agent can't find the price" turns out to be "the page has
+a dialog in the way."** Many storefronts show a region/city-selection or
+cookie-consent popup before the real page content, and if it's still up,
+`browser_open`'s visible text can look empty or incomplete even though the
+price is right there once it's dismissed. Check the numbered element list
+for something like `[2] button 'Moscow'` or `[1] button 'Accept'` and
+`browser_click` it before concluding the data isn't there.
 
 **Some data never shows up in the rendered text at all.** A storefront's
 price, stock level, or rating is very often loaded by a separate API call
@@ -678,8 +703,42 @@ can use" becomes mostly a one-time bootstrap per site, not a permanent
 wall.
 
 Not a bypass for strong anti-bot protection — a site that challenges
-headless Chromium specifically can still block or serve a challenge page,
-login or not.
+headless Chromium specifically can still block (often a 403, or a redirect
+to a "confirm you're human" page) whether or not you're logged in.
+Marketplaces with aggressive bot detection (Ozon, VseInstrumenti, and
+similar are known for this) are the most likely to hit it. If the block is
+only on the fully-rendered page, `browser_network_log` is sometimes still
+worth a look — an internal API call can occasionally get through even when
+the page itself is challenged — but there's no general fix beyond that
+short of the site not flagging headless Chromium in the first place. This
+is a deliberate line: proxy/IP rotation and CAPTCHA-solving to push
+through that kind of block are out of scope for this project.
+
+**When a specific page is blocked, search for it instead of retrying it.**
+A search engine has usually already indexed the page — its title, meta
+description, and often a price for a product page — so the answer can
+show up directly in a search result snippet without ever touching the
+blocked site. `web_search`'s description already tells the model to try
+this before giving up on a 403'd page. By default it scrapes DuckDuckGo's
+HTML results (no setup needed); set `GOOGLE_SEARCH_API_KEY` and
+`GOOGLE_SEARCH_CX` in `.env` to use Google's official Custom Search JSON
+API instead — generally richer, more reliable snippets, a sanctioned API
+rather than a scrape, and a free tier of 100 queries/day (see the comment
+above those two lines in `.env.example` for setup steps).
+
+### Recovering from a stuck or crashed browser session
+
+The module keeps exactly one browser/context/page open at a time. If the
+underlying Chromium process dies (killed for memory, crashed on a
+particularly hostile page), every `browser_*` call would otherwise keep
+failing with a connection error until the whole Talaria process restarted
+— `browser_open` detects that automatically (checked at the start of every
+call) and transparently rebuilds a fresh session, retrying once itself if
+the crash happens mid-navigation, so a single bad page doesn't require any
+manual intervention. `browser_reset` is there for what that can't fix on
+its own: a page that's genuinely stuck rather than actually crashed (a
+hung dialog, an infinite redirect), or a site that keeps failing the same
+way across several `browser_open` retries.
 
 `browser_click`/`browser_type` are excluded from cron jobs and autonomous
 mode (same reasoning as `run_python`: acting on a real, possibly
