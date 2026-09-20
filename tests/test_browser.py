@@ -105,6 +105,16 @@ fetch('/api/price.json').then(r => r.json()).then(function(data) {
 </script>
 </body></html>"""
 
+_FINGERPRINT_PAGE = """<!doctype html><html><body>
+<div id="fingerprint"></div>
+<script>
+document.getElementById('fingerprint').innerText =
+  'webdriver=' + navigator.webdriver +
+  ' lang=' + navigator.language +
+  ' tz=' + Intl.DateTimeFormat().resolvedOptions().timeZone;
+</script>
+</body></html>"""
+
 
 def _ref_for(snapshot: str, label: str) -> int:
     """Pulls the [index] out of a snapshot line whose element label
@@ -128,6 +138,23 @@ def test_browser_open_returns_visible_text_and_elements(site, tmp_path):
     assert "Go to page two" in result
     assert "Click me" in result
     assert "Search box" in result
+
+
+def test_browser_open_normalizes_the_automation_fingerprint(site, tmp_path):
+    # navigator.webdriver should read as undefined (not true, which is
+    # Chromium's default under automation control) and locale/timezone
+    # should match BROWSER_LOCALE/BROWSER_TIMEZONE (default ru-RU/
+    # Europe/Moscow) rather than Chromium's own en-US/UTC default —
+    # neither defeats real bot-detection, but a blank/automated-looking
+    # fingerprint is itself a tell that's cheap to not have.
+    base, directory = site
+    _write(directory, "fingerprint.html", _FINGERPRINT_PAGE)
+
+    result = browser_open(str(tmp_path), f"{base}/fingerprint.html", True)
+
+    assert "webdriver=undefined" in result
+    assert "lang=ru-RU" in result
+    assert "tz=Europe/Moscow" in result
 
 
 def test_browser_click_triggers_page_javascript(site, tmp_path):

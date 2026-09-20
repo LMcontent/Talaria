@@ -51,15 +51,26 @@ import os
 import time
 
 from talaria.providers.base import ToolSpec
+from talaria.user_agent import USER_AGENT
 
 _MAX_TEXT_CHARS = 3000
 _MAX_ELEMENTS = 40
 _MAX_RAW_HANDLES = 300
 _NAV_TIMEOUT_MS = 30000
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+# A default headless Chromium otherwise looks nothing like an ordinary
+# visit: no locale/timezone set (defaults to "en-US"/UTC regardless of
+# where Talaria actually runs), and navigator.webdriver stays true even
+# with --disable-blink-features=AutomationControlled on some Chromium
+# versions. None of this defeats real bot-detection systems (TLS/HTTP2
+# fingerprinting, JS challenges, IP reputation are untouched) — it just
+# stops the browser from gratuitously announcing itself as automation
+# through basics a real visitor's browser wouldn't leave blank. As a
+# side effect, a correct locale/timezone is also what several sites use
+# to auto-pick a region, which can skip a region-selection dialog outright
+# instead of needing browser_click to dismiss it.
+_LOCALE = os.environ.get("BROWSER_LOCALE", "ru-RU")
+_TIMEZONE_ID = os.environ.get("BROWSER_TIMEZONE", "Europe/Moscow")
+_WEBDRIVER_PATCH = "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
 _INTERACTIVE_SELECTOR = (
     "a[href], button, input, textarea, select, [role=button], [role=link], [onclick]"
 )
@@ -145,10 +156,14 @@ def _ensure_page(workspace_dir: str, headless: bool):
         state_path = _state_path(workspace_dir)
         storage_state = state_path if os.path.isfile(state_path) else None
         _context = _browser.new_context(
-            user_agent=_USER_AGENT,
+            user_agent=USER_AGENT,
             storage_state=storage_state,
             viewport={"width": 1280, "height": 900},
+            locale=_LOCALE,
+            timezone_id=_TIMEZONE_ID,
+            extra_http_headers={"Accept-Language": f"{_LOCALE},{_LOCALE.split('-')[0]};q=0.9,en-US;q=0.8,en;q=0.7"},
         )
+        _context.add_init_script(_WEBDRIVER_PATCH)
         _page = _context.new_page()
         _page.on("response", _on_response)
         _context_key = key

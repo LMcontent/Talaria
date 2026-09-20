@@ -2,8 +2,19 @@ import requests
 from bs4 import BeautifulSoup
 
 from talaria.providers.base import ToolSpec
+from talaria.user_agent import USER_AGENT
 
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Talaria/0.1)"}
+# A real Chrome UA (shared with talaria/tools/browser.py) plus the other
+# headers a real browser sends on a plain page request — the previous
+# "Talaria/0.1" UA announced this as a bot to any site that looks, which
+# some block outright regardless of what else about the request looks
+# fine. This doesn't help against sites that gate on more than headers
+# (TLS/HTTP2 fingerprinting, a JS challenge) — see browser_open for that.
+_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+}
 _TIMEOUT = 10
 _MAX_CHARS = 6000
 

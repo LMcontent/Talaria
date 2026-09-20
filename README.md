@@ -631,8 +631,20 @@ too, including its RISKY-verdict branch.
 `web_search`/`web_fetch` cover plain pages fast, but a real chunk of the
 web isn't reachable that way: JS-rendered content, a search box you need
 to type into and submit, a multi-click flow, or anything gated behind a
-login. The browser tools close that gap by giving the agent an actual
-Chromium session instead of a one-shot page fetch:
+login. Both `web_fetch` and the browser tools present as an ordinary
+desktop Chrome — a real User-Agent (not a self-identifying one; an earlier
+version literally sent `"Talaria/0.1"`, which announced itself as a bot to
+any site that looked), and `browser_open`'s Chromium session additionally
+sets a real locale/timezone (`BROWSER_LOCALE`/`BROWSER_TIMEZONE` in
+`.env`, default `ru-RU`/`Europe/Moscow`) and patches `navigator.webdriver`
+back to `undefined`, instead of leaving the blanks and automation
+signals a default headless launch leaves in place. None of this defeats
+an actual bot-detection *system* (TLS/HTTP2 fingerprinting, a JS
+challenge, IP reputation are all untouched) — it just stops the browser
+from gratuitously giving itself away through basics a real visitor's
+browser wouldn't leave blank. The browser tools close the remaining gap
+by giving the agent an actual Chromium session instead of a one-shot page
+fetch:
 
 - `browser_open(url)` navigates and returns the page's visible text plus a
   numbered list of clickable/fillable elements (a "set of marks", since
