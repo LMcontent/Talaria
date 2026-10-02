@@ -16,6 +16,20 @@ silently run code or grab new capabilities on its own. It can still
 read/write workspace files, and use the goal tree, notes, checkpoints,
 and any already-installed skill (those were security-reviewed when
 approved via propose_skill in an earlier, attended session).
+
+Before each check-in's own agent runs, _skill_context pulls in whatever
+the optional errbook/idea_lab/feedback_loop skills (skills/errbook.py,
+skills/idea_lab.py, skills/feedback_loop.py) already know that's relevant
+to the current focus — a matching past error+solution, outstanding
+iteration-lab advice, a feedback report flagging a weak area — and folds
+it into the prompt. Those skills' own lookup tools (errbook_lookup,
+lab_next, feedback_report) already existed and worked fine called by
+hand, but nothing in the unattended loop ever called them on its own, so
+whatever they'd learned sat there unread tick after tick. This is
+deliberately duck-typed by tool name against whatever's actually in the
+check-in's own (already EXCLUDED_TOOLS-filtered) tool list, not a hard
+import of skills/ — those are optional plugins, and a deployment without
+one (or without skills/ at all) just skips that piece.
 """
 
 import json
@@ -60,6 +74,66 @@ PROMPT_TEMPLATE = (
     "as you learn things.\n\n"
     "{focus}"
 )
+
+
+def _focus_query(focus: str) -> str:
+    """Strips goal_focus()'s own scaffolding (the 'FOCUS:'/'Priority:'/
+    'Recent notes:' labels) down to just the meaningful words — the goal's
+    own title/ancestor chain and its note text — so errbook_lookup's
+    coverage score isn't diluted by boilerplate that could never match a
+    stored error signature."""
+    parts = []
+    for line in focus.splitlines():
+        line = line.strip()
+        if line.startswith("FOCUS:"):
+            parts.append(line[len("FOCUS:"):].strip())
+        elif line.startswith("- "):
+            parts.append(line[2:].strip())
+    return " ".join(parts)
+
+
+def _skill_context(tools: list[ToolSpec], focus: str) -> str:
+    """Pulls in whatever the optional errbook/idea_lab/feedback_loop
+    skills already know that's relevant right now, so a check-in actually
+    benefits from past lessons instead of them sitting unread in state —
+    see the module docstring. Included only when there's something
+    genuinely actionable (a real errbook match, lab hypotheses actually in
+    play, a feedback report flagging a weak spot), not unconditionally on
+    every tick — an empty lab or a clean feedback history isn't a signal
+    worth spending prompt tokens on forever. Best-effort: a skill's
+    handler raising (or not being installed at all) just means that piece
+    is skipped, never a failed check-in."""
+    by_name = {t.name: t for t in tools}
+    parts = []
+
+    errbook_lookup = by_name.get("errbook_lookup")
+    if errbook_lookup is not None:
+        try:
+            result = errbook_lookup.handler(query=_focus_query(focus))
+        except Exception:
+            result = ""
+        if result.startswith("MATCH"):
+            parts.append("RELEVANT PAST LESSON (errbook):\n" + result)
+
+    lab_next = by_name.get("lab_next")
+    if lab_next is not None:
+        try:
+            result = lab_next.handler()
+        except Exception:
+            result = ""
+        if result and not result.startswith("Лаборатория пуста"):
+            parts.append("ITERATION LAB ADVICE:\n" + result)
+
+    feedback_report = by_name.get("feedback_report")
+    if feedback_report is not None:
+        try:
+            result = feedback_report.handler()
+        except Exception:
+            result = ""
+        if "ATTENTION" in result:
+            parts.append("FEEDBACK SIGNAL:\n" + result)
+
+    return "\n\n".join(parts)
 
 
 _LOG_FILENAME = ".autonomous_log.json"
@@ -109,6 +183,10 @@ def tick(config: Config, provider: Provider, usage: UsageTracker) -> str | None:
     print(f"\n[autonomous] check-in at {started}")
     print(f"[autonomous] {focus}")
     prompt = PROMPT_TEMPLATE.format(excluded=", ".join(sorted(EXCLUDED_TOOLS)), focus=focus)
+    skill_context = _skill_context(tools, focus)
+    if skill_context:
+        print(f"[autonomous] relevant skill context:\n{skill_context}")
+        prompt += "\n\n" + skill_context
     _write_status(config.workspace_dir, {"started": started, "focus": focus})
     try:
         reply = agent.run(prompt)

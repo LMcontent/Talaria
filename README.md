@@ -310,6 +310,20 @@ share the CLI/web UI's conversation history, so autonomous work never
 pollutes an interactive chat; the goal tree, notes and skill state are
 what carry context from one check-in to the next instead.
 
+**Each check-in also pulls in relevant lessons from the `errbook`,
+`idea_lab`, and `feedback_loop` skills (see Skills below), if installed.**
+Those skills' lookup tools (`errbook_lookup`, `lab_next`,
+`feedback_report`) always worked fine called by hand, but nothing
+previously called them automatically in the unattended loop — whatever
+they'd learned just sat there unread, tick after tick. Before running the
+check-in's agent, a matching past error+solution, outstanding
+iteration-lab advice, or a feedback report flagging a weak area (only
+when there actually is one — an empty lab or a clean feedback history
+adds nothing) gets folded straight into the prompt. This is the one place
+in Talaria where "outcome → stored → read back automatically → changes
+the next decision" genuinely closes the loop without the model having to
+remember to check.
+
 The web UI's sidebar has an "Autonomous log" section showing the most
 recent check-ins (newest first) — it's read fresh from
 `.autonomous_log.json` on load, with a refresh (&#8635;) link next to the
