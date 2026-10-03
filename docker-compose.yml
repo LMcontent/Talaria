@@ -1,0 +1,50 @@
+# See README.md's "Running in Docker" section.
+#
+# Quick start:
+#   cp .env.example .env   # fill in LLM_PROVIDER + the matching API key
+#   docker compose up --build
+# Then open http://127.0.0.1:5000
+#
+# To also run the unattended autonomous loop (off by default, same as
+# without Docker — see the README's Autonomous mode section):
+#   docker compose --profile autonomous up --build
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      # Override whatever's in .env for these three — they only make
+      # sense inside this container (see the Dockerfile for why).
+      - WEB_HOST=0.0.0.0
+      - WORKSPACE_DIR=/data/workspace
+      - BROWSER_HEADLESS=true
+    volumes:
+      - talaria-workspace:/data/workspace
+      # Bind-mount instead, if you'd rather have WORKSPACE_DIR as a plain
+      # folder on the host you can browse/edit directly (swap for the
+      # named volume above):
+      #   - ./workspace:/data/workspace
+      #
+      # Edit skills/ on the host without rebuilding the image:
+      #   - ./skills:/app/skills:ro
+    restart: unless-stopped
+
+  autonomous:
+    build: .
+    command: ["python", "-m", "talaria.autonomous"]
+    profiles: ["autonomous"]
+    env_file:
+      - .env
+    environment:
+      - WORKSPACE_DIR=/data/workspace
+      - AUTONOMOUS_MODE=true
+    volumes:
+      - talaria-workspace:/data/workspace
+    restart: unless-stopped
+
+volumes:
+  talaria-workspace:

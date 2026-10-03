@@ -1,0 +1,11 @@
+# Mirrors .gitignore, plus Docker/VCS-specific exclusions — nothing here
+# is needed to run the app, and .env especially must never end up baked
+# into an image layer (pass it at `docker run`/compose time instead, see
+# README's "Running in Docker" section).
+__pycache__/
+*.pyc
+.env
+workspace/
+*.egg-info/
+.git/
+.pytest_cache/

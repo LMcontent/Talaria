@@ -161,6 +161,81 @@ playwright install chromium
 python -m talaria.cli
 ```
 
+### Running in Docker
+
+An alternative to the pip/Anaconda setup above — doesn't touch any of
+Talaria's own code, just wraps the same app (`Dockerfile`,
+`docker-compose.yml`, `.dockerignore` at the repo root).
+
+```bash
+cp .env.example .env
+# edit .env: set LLM_PROVIDER and the matching API key, same as above
+docker compose up --build
+```
+
+Then open http://127.0.0.1:5000 — this starts the **web UI** (not the
+CLI, which is interactive and doesn't fit a background container well;
+see below if you want it anyway). First build takes a few minutes:
+`playwright install --with-deps chromium` pulls in Chromium plus the OS
+packages it needs to actually launch headless, which is most of the
+image's size.
+
+Three things the container sets differently from a plain `.env`, and why
+— you don't need to change anything, `docker-compose.yml` already handles
+it, this is just so "it behaves differently in Docker" isn't a mystery:
+
+- **`WEB_HOST=0.0.0.0`**, not the `127.0.0.1` default. Binding to
+  localhost *inside* the container would make the web UI unreachable from
+  outside it — Docker's own port publishing (`ports: ["5000:5000"]` in
+  `docker-compose.yml`) is what actually controls what's exposed to your
+  host, same safety boundary as before, just enforced at a different
+  layer.
+- **`WORKSPACE_DIR=/data/workspace`**, backed by a named Docker volume
+  (`talaria-workspace`) — so conversation history, notes, goals, cron
+  jobs, skill state, the `run_python` sandbox venv, and browser login
+  state (`.browser_state.json`) all survive `docker compose down` /
+  container recreation. Swap it for a plain host folder instead, if
+  you'd rather browse/edit those files directly — see the commented-out
+  bind-mount line in `docker-compose.yml`.
+- **Runs as a non-root user**, not because Talaria asks for it but
+  because Chromium's own sandboxing refuses to launch as root without
+  `--no-sandbox` (which `browser_open` deliberately doesn't pass — see
+  "Browsing like a human" below). Cleaner to sidestep that in the
+  Dockerfile than to weaken it for every user just to suit a container
+  default.
+
+`run_python`/`install_package` confirmation prompts and `propose_skill`'s
+security-review gate work exactly like the non-Docker setup — they print
+to **this container's own logs** (`docker compose logs -f web`), not the
+browser, same as "the terminal running the server" everywhere else in
+this README. Answering one means typing into that log stream's attached
+terminal, so run `docker compose up --build` (not `-d`) the first time
+you expect to hit one, or `docker attach <container>` afterwards.
+
+To also run the unattended [autonomous loop](#autonomous-mode) (off by
+default, same as without Docker):
+
+```bash
+docker compose --profile autonomous up --build
+```
+
+This starts a second container from the same image, sharing the same
+`talaria-workspace` volume — so the goal tree, notes, and skill state
+`autonomous` reads and writes are the same ones `web` sees.
+
+**Want the CLI instead** (e.g. to script something, or just prefer a
+terminal)? It's interactive, so run it attached rather than as a
+long-lived service:
+
+```bash
+docker compose run --rm web python -m talaria.cli
+```
+
+**Updating:** `git pull`, then `docker compose up --build` again — only
+layers that actually changed get rebuilt (Chromium/dependencies are
+cached unless `requirements.txt` changed). Your data in the
+`talaria-workspace` volume is untouched by a rebuild.
+
 ### Web UI
 
 A local browser chat, as an alternative to the terminal:
