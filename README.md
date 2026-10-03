@@ -6,6 +6,59 @@ A small agent for the internet, documents, code and sub-agents, with a
 swappable LLM backend: **Claude API** or any **OpenAI-compatible router**
 (OrcaRouter, OpenRouter, etc. — e.g. a free model like `qwen/qwen3.8-27b-free`).
 
+## How it works
+
+Four ways in (a human chatting via the CLI or web UI, a scheduled
+`cron_add` job, or the unattended autonomous loop), all driving the same
+tool-calling `Agent` loop against a swappable `Provider`. Everything the
+agent does — memory, goals, cron jobs, skill state, the code sandbox — is
+plain files under `WORKSPACE_DIR`, so any of the four entry points sees
+the same persistent state the others left behind.
+
+```mermaid
+flowchart TB
+    U(["You"])
+
+    U -->|chat| CLI["CLI<br/>python -m talaria.cli"]
+    U -->|chat| Web["Web UI<br/>python -m talaria.web"]
+
+    Cron["Cron scheduler<br/>fires on schedule, runs inside the CLI/Web process"]
+    Auto["Autonomous mode<br/>python -m talaria.autonomous — separate process, own interval"]
+
+    CLI --> Agent["Agent loop<br/>(talaria/agent.py)"]
+    Web --> Agent
+    Cron -- reduced tool set --> Agent
+    Auto -- "reduced tool set +<br/>errbook/idea_lab/feedback_loop context" --> Agent
+
+    Agent <--> Provider["Provider<br/>Claude API or OpenAI-compatible router"]
+    Agent --> Tools["Tools<br/>web · browser · documents ·<br/>code sandbox · memory · goals · skills"]
+
+    Tools --> State[("Workspace state<br/>history/chats · notes · goals ·<br/>cron jobs · skill state · sandbox venv")]
+    State --> Agent
+
+    Tools -. "propose_skill +<br/>security review" .-> NewTool["New tool<br/>loaded live, no restart"]
+    NewTool -. available to .-> Tools
+
+    State -. goal_focus .-> Auto
+    State -. "errbook / idea_lab /<br/>feedback_loop lookups" .-> Auto
+```
+
+A few things worth calling out before the detail below:
+
+- **The web UI and CLI are two front ends for the same `Agent`** —
+  nothing in the tool-calling loop knows or cares which one is driving it.
+- **Cron and autonomous runs get a deliberately smaller tool list**: no
+  code execution, no new skills, no delegation — see
+  [Autonomous mode](#autonomous-mode) and [Cron jobs](#cron-jobs) for why.
+- **`propose_skill` is the one way the agent's own tool list grows** —
+  gated by a security-review model call plus your confirmation, see
+  [Self-authored skills](#self-authored-skills).
+- **The autonomous loop is the one place state gets read back
+  automatically** rather than only on the model's own initiative — see
+  the callout in [Autonomous mode](#autonomous-mode).
+
+## Install & run
+
 ### Setup
 
 ```bash
@@ -138,9 +191,10 @@ stays "New chat" in the list until something's actually said in it.
 memory are shared across every chat** — they're capabilities and durable
 project state, not something scoped to one conversation, so a skill
 authored in one chat is immediately available in every other one. Only
-the moment-to-moment back-and-forth (conversation history) is split per
-chat; see "Memory" below for why long-term memory isn't just dumped into
-every chat wholesale despite being shared.
+the moment-to-moment back-and-forth (conversation history) **and role**
+are split per chat; see [Memory](#memory) below for why long-term memory
+isn't just dumped into every chat wholesale despite being shared, and
+[Roles](#roles) for the per-chat role switch.
 
 Switching chats (or starting a new one) is blocked while a reply is still
 generating in the current one, to avoid a race between the switch and the
@@ -184,18 +238,23 @@ back down mid-generation. Chat text is sized a bit larger than the
 sidebar's default for comfortable reading; the sidebar itself runs
 noticeably larger still, since it's mostly short labels.
 
+**Links in chat render as clickable anchors** — a bare `https://...` URL
+or a Markdown `[text](url)` link both become real `<a>` tags (opening in
+a new tab), instead of sitting there as unclickable text you'd have to
+copy out.
+
 **Images and video render inline** — standard Markdown image syntax,
 `![description](filename.png)`, shows the actual picture (or a `<video
 controls>` player, by extension: mp4/webm/ogg/mov) in the chat instead of
 just the raw text. Relative paths resolve against `WORKSPACE_DIR` — drop
 a file in there (or have the agent produce one via `run_python`/
-`write_document`) and reference it by filename; an `http(s)://` or
-`data:` URL is used as-is. This is the point of "Open workspace folder"
-above and inline images together: put a picture in, ask the agent to
-look at/describe/iterate on it, see its output rendered right there, no
-separate viewer needed. The system prompt tells the model about this
-syntax specifically for the web UI (the CLI has no way to render an
-image, so it isn't told to bother).
+`write_document`, or a screenshot via `browser_screenshot`) and reference
+it by filename; an `http(s)://` or `data:` URL is used as-is. This is the
+point of "Open workspace folder" above and inline images together: put a
+picture in, ask the agent to look at/describe/iterate on it, see its
+output rendered right there, no separate viewer needed. The system prompt
+tells the model about this syntax specifically for the web UI (the CLI
+has no way to render an image, so it isn't told to bother).
 
 The file is served by a dedicated `/workspace-file/<path>` route, not a
 general static-file handler — restricted to an image/video extension
@@ -228,6 +287,8 @@ can reach this port can chat with the agent, including its `run_python`
 tool (which still asks for approval in your terminal, but is still not
 something you want strangers triggering).
 
+## Memory & long-running work
+
 ### Memory
 
 Conversation history is saved to `WORKSPACE_DIR/.history.json` after every
@@ -242,7 +303,7 @@ tune it in `.env` if you need a longer or shorter window.
 **Long-term memory** is separate from conversation history: the `remember`
 tool saves a fact/preference to `WORKSPACE_DIR/.notes.json`, letting the
 agent "know" things across restarts (and, in the web UI, across separate
-chats — see below), not just within one open terminal. `recall` lists
+chats — see above), not just within one open terminal. `recall` lists
 saved notes with their index, `forget <index>` removes one.
 Override the file with `NOTES_FILE` in `.env`.
 
@@ -289,18 +350,21 @@ anything by itself. Stop the process (or set `AUTONOMOUS_MODE=false`) to
 turn it back off.
 
 **Unattended runs never get `run_python`, `install_package`,
-`propose_skill`, `delegate_task`, or `run_procedure`.** The first three
-execute code or change what's available with your OS-level permissions
-and normally ask for a `y/N` confirmation in the terminal, which has no
-one to answer it when nothing is watching; the last two are excluded for
-a different reason — both build their internal sub-agent/loop from this
-agent's own full tool list, so without excluding them by name they'd
-silently regain `run_python` and the rest right back through that inner
-loop. An autonomous check-in can still read/write workspace files and use
-the goal tree, notes, checkpoints, and any skill you already approved
-through `propose_skill` in an earlier, attended session (those went
-through a security review when you approved them — this doesn't
-re-review them).
+`propose_skill`, `delegate_task`, `run_procedure`, `browser_click`, or
+`browser_type`.** The code/package/skill tools execute with your OS-level
+permissions and normally ask for a `y/N` confirmation in the terminal,
+which has no one to answer it when nothing is watching; `delegate_task`
+and `run_procedure` are excluded for a different reason — both build
+their internal sub-agent/loop from this agent's own full tool list, so
+without excluding them by name they'd silently regain `run_python` and
+the rest right back through that inner loop; `browser_click`/`browser_type`
+are excluded because they can act on a real, possibly logged-in browser
+session (submit a form, send a message, spend money) with nobody watching
+to catch a mistake. An autonomous check-in can still read/write workspace
+files, browse read-only (`browser_open` and the rest), and use the goal
+tree, notes, checkpoints, and any skill you already approved through
+`propose_skill` in an earlier, attended session (those went through a
+security review when you approved them — this doesn't re-review them).
 
 Each check-in is logged to `WORKSPACE_DIR/.autonomous_log.json`
 (timestamp, the goal it focused on, its reply) as well as printed to the
@@ -349,11 +413,12 @@ checks once every 30 seconds for jobs that are due.
 
 Same restrictions as autonomous mode, and for the same reason: a cron
 firing is unattended, so it never gets `run_python`, `install_package`,
-`propose_skill`, `delegate_task`, or `run_procedure`. Each firing is a
-fresh, short-lived agent call (not the web UI/CLI's own conversation) and
-is logged to `WORKSPACE_DIR/.cron_log.json`, printed to the terminal, and
-shown in the web UI sidebar's "Cron jobs" section alongside each job's
-schedule and last-run time.
+`propose_skill`, `delegate_task`, `run_procedure`, `browser_click`, or
+`browser_type`. Each firing is a fresh, short-lived agent call (not the
+web UI/CLI's own conversation) and is logged to
+`WORKSPACE_DIR/.cron_log.json`, printed to the terminal, and shown in the
+web UI sidebar's "Cron jobs" section alongside each job's schedule and
+last-run time.
 
 ### Active now (web UI sidebar)
 
@@ -386,6 +451,8 @@ Restoring only rewrites files on disk — it can't reach into the current
 process's already-loaded conversation, so run `/reset` (or start a new
 session) right after a restore to make the rollback actually take effect
 in what the agent remembers.
+
+## Safety, streaming & performance
 
 ### Streaming and code execution
 
@@ -460,7 +527,7 @@ single turn gets before the agent gives up with `[stopped: reached
 max_turns]`; `MAX_DELEGATE_DEPTH` (default 3) is how many levels deep
 `delegate_task` sub-agents can delegate further. Raise either in `.env`
 for longer/deeper tool-chains — pair with `MAX_SESSION_TOKENS` (see
-Usage above) if you're on a metered key and want a backstop against a
+Usage below) if you're on a metered key and want a backstop against a
 runaway loop.
 
 With `LLM_PROVIDER=claude`, `CLAUDE_EFFORT` (`low`/`medium`/`high`
@@ -554,6 +621,8 @@ like OrcaRouter/OpenRouter serve a large, changing catalog), set
 tokens) in `.env` to also see an estimated cost alongside the token count.
 Left at `0` (default), only the raw token count is shown — no guessed cost.
 
+## Customization
+
 ### Roles
 
 `/role` lists the built-in roles and shows which is active; `/role <name>`
@@ -587,7 +656,10 @@ are two more small examples (the latter needs a free `WOLFRAM_APPID` in
 failing silently if it's not set). `/tools` in the CLI lists everything
 currently loaded, built-in and skill-provided alike. A skill file that
 fails to import is skipped with a `[skills] failed to load ...` message
-— it doesn't take down the others.
+— it doesn't take down the others. `load_skills` scans the directory
+flat (no subfolders) — at the current count (about a dozen files) that's
+still easy to scan with a plain `ls skills/`; the groupings below are
+just for this README, not a directory layout.
 
 Skills that persist their own state (`state_store`, `errbook`, `idea_lab`,
 `feedback_loop`, `meaning_cache`, `simple_scheduler`, `shift_log`) do it
@@ -600,6 +672,23 @@ silently point at the wrong place — e.g. `talaria.autonomous` started
 from a different working directory than the CLI/web UI. All of them now
 resolve the same `WORKSPACE_DIR` `Config.workspace_dir` does, regardless
 of process cwd.)
+
+**The "learning suite"** — `errbook` (error signature → working solution,
+fuzzy lookup), `idea_lab` (hypothesis/experiment tracking with `lab_next`
+advice), `feedback_loop` (rated outcomes with a weak-area report), and
+`meaning_cache` (TTL'd cache for expensive results like web searches) —
+are the four skills Autonomous mode's `_skill_context` reads back from
+automatically (see above); everything else here is purely on-demand, the
+model has to decide to call it.
+
+**Everything else**, roughly: `image_tools`/`office_files`/`pdf_tools`
+handle images, Office documents and PDFs; `state_store` is a generic
+key-value store for anything that doesn't fit one of the above;
+`simple_scheduler` and `shift_log` are a task queue and session-handoff
+log respectively (both documented as needing a manual call — neither
+wakes itself up or is wired into the autonomous loop); `diverge` is a
+stateless creativity aid (random stimulus/persona/prompt-card generators)
+feeding `idea_lab`.
 
 ### Self-authored skills
 
@@ -628,14 +717,19 @@ capability the agent can call forever is a bigger decision than one
 mode (see "Streaming and code execution" above), which skips this gate
 too, including its RISKY-verdict branch.
 
+## What the agent can do
+
 ### Tools available to the agent
 
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed by default, uses DuckDuckGo HTML; optionally Google's Custom Search API instead, see `GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`). Fast, but can't run JavaScript or interact with a page.
-- `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human — interactive sessions and logins" below.
+- `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log`, `browser_reset` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human" below.
 - `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
 - `remember`, `recall`, `forget` — long-term memory across sessions, see above
+- `goal_add`, `goal_update`, `goal_list`, `goal_focus` — the persistent goal tree, see Goals above
+- `checkpoint_save`, `checkpoint_restore`, `checkpoint_list`, `checkpoint_discard` — snapshot/restore persistent state, see Checkpoints above
+- `cron_add`, `cron_list`, `cron_remove`, `cron_toggle` — schedule unattended check-ins, see Cron jobs above
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 - `run_procedure` — run a bounded, repetitive tool-calling procedure as a compact state machine instead of a growing conversation, see below
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
@@ -796,6 +890,8 @@ Excluded from Autonomous mode's tool list for the same reason as
 tool list, so it would otherwise silently regain `run_python` and the
 other unattended-excluded tools through it.
 
+## Contributing
+
 ### Development / making it your own
 
 Two ways to get your own copy, depending on the goal.
@@ -853,16 +949,21 @@ pytest
 No API key or network access needed — every test runs against a scripted
 fake `Provider` (`tests/conftest.py`) that returns pre-queued replies
 instead of calling a real model, so the suite is fast and deterministic.
-Covers the agent's tool-calling loop, history compaction, memory/notes
-persistence, skill loading (including a regression test for a skill that
-shadows `ToolSpec` with a conflicting class), the `propose_skill`
-security-review gate — SAFE/RISKY verdicts, a failed review call, a
-malformed verdict, a bad filename, code that fails to import — session
-token/cost tracking and the `MAX_SESSION_TOKENS` cap (including that a
-`delegate_task` sub-agent's spend lands on the same session total), the
-web UI's HTTP endpoints including its streaming and stop routes (the
-latter via a fake provider that pauses mid-stream so a test can trigger a
-real cancellation from a second thread, not a mocked one), and the
+Covers the agent's tool-calling loop (including parallel tool-call
+execution when a turn requests more than one), history compaction,
+memory/notes persistence, skill loading (including a regression test for
+a skill that shadows `ToolSpec` with a conflicting class), the
+`propose_skill` security-review gate — SAFE/RISKY verdicts, a failed
+review call, a malformed verdict, a bad filename, code that fails to
+import — session token/cost tracking and the `MAX_SESSION_TOKENS` cap
+(including that a `delegate_task` sub-agent's spend lands on the same
+session total), the web UI's HTTP endpoints including its streaming and
+stop routes (the latter via a fake provider that pauses mid-stream so a
+test can trigger a real cancellation from a second thread, not a mocked
+one), the browser tools against a real local Chromium and a tiny
+in-process HTTP fixture server (no real network dependency — click/type/
+scroll/navigation, login-session persistence across a simulated restart,
+and the self-healing recovery from a crashed/closed browser), and the
 `run_python`/`install_package` sandbox — a real venv is actually created
 and code actually executed in it (venv creation itself needs no network,
 just Python's bundled ensurepip, so this stays offline too), confirming
@@ -879,33 +980,42 @@ idea as `py_compile`/`pyflakes` but for behavior instead of syntax.
 
 ```
 talaria/
-  config.py            # env-based settings, provider selection
-  memory.py             # persist/reload conversation history to disk
-  compaction.py          # trim old turns once history grows too large
-  notes.py                # long-term memory (remember/recall/forget)
-  roles.py               # built-in system-prompt presets, switchable with /role
-  skills.py               # loads pluggable tools from SKILLS_DIR
-  security_review.py      # model-based review call used by propose_skill
-  usage.py                # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
-  sandbox.py               # the dedicated venv run_python/install_package use
-  agent.py             # the tool-calling loop
+  config.py              # env-based settings, provider selection
+  memory.py                # persist/reload conversation history to disk
+  compaction.py              # trim old turns once history grows too large
+  notes.py                     # long-term memory (remember/recall/forget)
+  chats.py                      # multi-chat list/metadata for the web UI
+  roles.py                       # built-in system-prompt presets, switchable with /role
+  system_prompt.py                # builds the system prompt for a role (+ memory hint)
+  skills.py                         # loads pluggable tools from SKILLS_DIR
+  security_review.py                 # model-based review call used by propose_skill
+  usage.py                            # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
+  sandbox.py                           # the dedicated venv run_python/install_package use
+  json_store.py                         # shared JSON persistence for skills' own state
+  user_agent.py                          # shared browser/HTTP User-Agent string
+  workspace_log.py                        # append-only JSON log helper (cron/autonomous logs)
+  agent.py                              # the tool-calling loop, incl. parallel tool-call execution
+  autonomous.py                           # unattended background loop (separate process)
+  cron_scheduler.py                        # fires scheduled cron_add jobs on a timer
+  cli.py                                 # REPL entry point
+  web.py                                   # local browser chat UI (Flask), same Agent/tools as the CLI
   providers/
-    base.py            # provider-neutral message/tool types
-    claude.py           # Anthropic backend (streams responses)
-    openai_compat.py    # OpenAI-compatible router backend (streams responses)
-    dns_pin.py           # optional DNS pinning for blocked regions
+    base.py              # provider-neutral message/tool types
+    claude.py               # Anthropic backend (streams responses)
+    openai_compat.py          # OpenAI-compatible router backend (streams responses)
+    dns_pin.py                  # optional DNS pinning for blocked regions
   tools/
     web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
-    delegate.py, skill_authoring.py, registry.py
-  cli.py                # REPL entry point
-  web.py                 # local browser chat UI (Flask), same Agent/tools as the CLI
+    goals.py, cron.py, checkpoint.py, delegate.py, procedure.py,
+    skill_authoring.py, registry.py, confirmation.py, state_lock.py
 skills/
-  example_time.py        # example pluggable skill — see Skills above
-  roman_numerals.py       # another small example skill
-  wolfram_alpha.py        # example skill needing WOLFRAM_APPID in .env
+  example_time.py, roman_numerals.py, wolfram_alpha.py   # small example skills
+  errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py   # the "learning suite" — see Skills above
+  image_tools.py, office_files.py, pdf_tools.py   # document/media helpers
+  state_store.py, simple_scheduler.py, shift_log.py, diverge.py   # misc utilities
 tests/
-  conftest.py             # ScriptedProvider/RaisingProvider fakes shared by the suite
-  test_*.py                # see Tests above
+  conftest.py              # ScriptedProvider/RaisingProvider fakes shared by the suite
+  test_*.py                  # see Tests above
 ```
 
 Conversation history is kept in a provider-neutral shape and converted to
