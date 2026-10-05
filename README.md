@@ -309,9 +309,10 @@ gets the bordered block, just without coloring. Only your own messages
 get the blue bubble; assistant replies flow as plain text, unboxed. While
 a reply is streaming, the page only auto-scrolls if you were already at
 the bottom — scroll up to read earlier messages and it won't yank you
-back down mid-generation. Chat text is sized a bit larger than the
-sidebar's default for comfortable reading; the sidebar itself runs
-noticeably larger still, since it's mostly short labels.
+back down mid-generation. Chat text matches the sidebar's `provider: ...
+· model: ...` line (18px) rather than the browser's own unstyled
+default — most of the sidebar runs a bit larger still, since it's mostly
+short labels that read fine bigger.
 
 **Links in chat render as clickable anchors** — a bare `https://...` URL
 or a Markdown `[text](url)` link both become real `<a>` tags (opening in
