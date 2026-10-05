@@ -176,7 +176,7 @@ INDEX_HTML = r"""<!doctype html>
     display: flex; flex-direction: column; gap: 18px;
   }
 
-  .msg { white-space: pre-wrap; word-wrap: break-word; line-height: 1.55; font-size: 20px; }
+  .msg { white-space: pre-wrap; word-wrap: break-word; line-height: 1.55; font-size: 18px; }
   .msg.user {
     align-self: flex-end; max-width: 75%; background: #2b6cb0; color: #fff;
     padding: 8px 12px; border-radius: 10px;
