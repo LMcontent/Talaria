@@ -28,7 +28,7 @@ flowchart TB
     CLI --> Agent["Agent loop<br/>(talaria/agent.py)"]
     Web --> Agent
     Cron -- reduced tool set --> Agent
-    Auto -- "reduced tool set +<br/>errbook/idea_lab/feedback_loop context" --> Agent
+    Auto -- "reduced tool set +<br/>learning-suite context + due tasks" --> Agent
 
     Agent <--> Provider["Provider<br/>Claude API or OpenAI-compatible router"]
     Agent --> Tools["Tools<br/>web · browser · documents ·<br/>code sandbox · memory · goals · skills"]
@@ -40,7 +40,7 @@ flowchart TB
     NewTool -. available to .-> Tools
 
     State -. goal_focus .-> Auto
-    State -. "errbook / idea_lab /<br/>feedback_loop lookups" .-> Auto
+    State -. "learning-suite lookups +<br/>scheduler task_tick" .-> Auto
 ```
 
 A few things worth calling out before the detail below:
@@ -399,8 +399,8 @@ of goals and sub-goals (each with a priority and a status) in
 instead of needing to be restated every time. `goal_list` shows the tree;
 `goal_update` changes a goal's status/priority or appends a progress note
 (goals aren't deleted on failure — set status to `dropped` and the record
-stays, the same "don't lose the history of what was tried" idea as
-`errbook`/`idea_lab`).
+stays, the same "don't lose the history of what was tried" idea as the
+learning suite's `errbook`/`idea_lab` tools below).
 
 The actually useful part is `goal_focus`: rather than the vague top-level
 objective ("earn money"), it picks the single highest-priority *active*
@@ -438,9 +438,10 @@ are excluded because they can act on a real, possibly logged-in browser
 session (submit a form, send a message, spend money) with nobody watching
 to catch a mistake. An autonomous check-in can still read/write workspace
 files, browse read-only (`browser_open` and the rest), and use the goal
-tree, notes, checkpoints, and any skill you already approved through
-`propose_skill` in an earlier, attended session (those went through a
-security review when you approved them — this doesn't re-review them).
+tree, notes, checkpoints, the learning suite, and any skill you already
+approved through `propose_skill` in an earlier, attended session (those
+went through a security review when you approved them — this doesn't
+re-review them).
 
 Each check-in is logged to `WORKSPACE_DIR/.autonomous_log.json`
 (timestamp, the goal it focused on, its reply) as well as printed to the
@@ -450,19 +451,33 @@ share the CLI/web UI's conversation history, so autonomous work never
 pollutes an interactive chat; the goal tree, notes and skill state are
 what carry context from one check-in to the next instead.
 
-**Each check-in also pulls in relevant lessons from the `errbook`,
-`idea_lab`, and `feedback_loop` skills (see Skills below), if installed.**
-Those skills' lookup tools (`errbook_lookup`, `lab_next`,
-`feedback_report`) always worked fine called by hand, but nothing
-previously called them automatically in the unattended loop — whatever
-they'd learned just sat there unread, tick after tick. Before running the
-check-in's agent, a matching past error+solution, outstanding
-iteration-lab advice, or a feedback report flagging a weak area (only
-when there actually is one — an empty lab or a clean feedback history
-adds nothing) gets folded straight into the prompt. This is the one place
-in Talaria where "outcome → stored → read back automatically → changes
-the next decision" genuinely closes the loop without the model having to
-remember to check.
+**Each check-in also pulls in relevant lessons from the learning suite**
+(`errbook`, `idea_lab`, `feedback_loop` — see [Learning suite](#learning-suite)
+below; these are built-in tools, not optional skills). Their lookups
+(`errbook_lookup`, `lab_next`, `feedback_report`) always worked fine
+called by hand, but nothing previously called them automatically in the
+unattended loop — whatever they'd learned just sat there unread, tick
+after tick. Before running the check-in's agent, a matching past
+error+solution, outstanding iteration-lab advice, or a feedback report
+flagging a weak area (only when there actually is one — an empty lab or a
+clean feedback history adds nothing) gets folded straight into the
+prompt. This is one of two places in Talaria where "outcome → stored →
+read back automatically → changes the next decision" genuinely closes the
+loop without the model having to remember to check — the other is below.
+
+**Each check-in also calls `task_tick`, if `simple_scheduler` (see
+[Skills](#skills)) is installed, and executes whatever comes back due.**
+That skill's own docstring is honest about its limitation: a task queued
+with `task_add` only became actionable once *some* session happened to
+call `task_tick` by hand — nothing woke the agent up on its own. Wiring
+the autonomous loop's periodic wake-up into that exact lookup closes the
+gap: a recurring or one-time task set up once now genuinely runs on
+schedule as long as this process keeps running, no attended session
+required. This check also runs even when there's no active goal — a due
+task alone is enough to trigger a check-in (with a shorter prompt that
+just says to execute what's due), since gating entirely on `goal_focus`
+would otherwise make the scheduler useless for anyone not also using the
+goal tree.
 
 The web UI's sidebar has an "Autonomous log" section showing the most
 recent check-ins (newest first) — it's read fresh from
@@ -515,18 +530,48 @@ running and removed the moment it finishes.
 
 Before a risky or experimental task, ask the agent to `checkpoint_save`
 under a name — it snapshots conversation history, notes, workspace files,
-and every skill's own persisted state (errbook, feedback, caches, etc.) as
-they stand right then. If the experiment goes badly, `checkpoint_restore`
-brings all of that back to exactly that point, discarding everything
-written since — so a bad run's wrong answers, mis-learned "lessons" in a
-skill's state, or junk files never make it into the memory you keep using
-afterwards. `checkpoint_list` shows saved checkpoints, `checkpoint_discard`
-deletes one you no longer need.
+the learning suite's own state, and any remaining skill's persisted state
+(caches, task queues, etc.) as they stand right then. If the experiment
+goes badly, `checkpoint_restore` brings all of that back to exactly that
+point, discarding everything written since — so a bad run's wrong
+answers, mis-learned "lessons", or junk files never make it into the
+memory you keep using afterwards. `checkpoint_list` shows saved
+checkpoints, `checkpoint_discard` deletes one you no longer need.
 
 Restoring only rewrites files on disk — it can't reach into the current
 process's already-loaded conversation, so run `/reset` (or start a new
 session) right after a restore to make the rollback actually take effect
 in what the agent remembers.
+
+### Learning suite
+
+Four built-in tools the agent can use to actually learn something across
+sessions, instead of starting cold every time:
+
+- **`errbook`** (`errbook_add`/`errbook_lookup`/`errbook_list`) — save an
+  error signature plus the solution that actually fixed it; `errbook_lookup`
+  fuzzy-matches a paraphrased description against past entries (query
+  coverage, not exact text) so a rephrased version of a known problem
+  still finds its fix.
+- **`idea_lab`** (`lab_hyp`/`lab_exp`/`lab_show`/`lab_next`) — a visible
+  hypothesis/experiment journal for iterative work; `lab_next` looks at
+  the pattern of keeps/pivots/drops so far and suggests the next concrete
+  move instead of leaving "what do I try next" up in the air.
+- **`feedback_loop`** (`feedback_rate`/`feedback_report`) — the only
+  *external* signal the agent has: rate a result 1-5 and `feedback_report`
+  aggregates by task type (worst first), flagging a weak area once its
+  mean drops below 4.0.
+- **`meaning_cache`** (`cache_put`/`cache_get`/`cache_list`/`cache_clear`) —
+  a TTL'd, fuzzy-matched cache for expensive results (web searches, parsed
+  pages) so a near-duplicate request doesn't repeat the same work.
+
+All four persist to their own file directly under `WORKSPACE_DIR`
+(`.errbook.json`, `.idea_lab.json`, `.feedback.json`, `.meaning_cache.json`),
+same convention as `.goals.json`/`.cron.json`, and are built-in — no
+`SKILLS_DIR` entry needed. [Autonomous mode](#autonomous-mode) reads
+`errbook_lookup`/`lab_next`/`feedback_report` back automatically on every
+check-in (see there for why); everything else here is purely on-demand,
+the model has to decide to call it.
 
 ## Safety, streaming & performance
 
@@ -737,34 +782,31 @@ flat (no subfolders) — at the current count (about a dozen files) that's
 still easy to scan with a plain `ls skills/`; the groupings below are
 just for this README, not a directory layout.
 
-Skills that persist their own state (`state_store`, `errbook`, `idea_lab`,
-`feedback_loop`, `meaning_cache`, `simple_scheduler`, `shift_log`) do it
-through `talaria/json_store.py`, which saves under `WORKSPACE_DIR/state/`
-— use `load_json`/`save_json` from there in a new skill that needs its
-own persistent file, rather than hand-rolling `open()`/`json.load()`
-again. (Older versions of these skills used a `./state` folder relative
-to wherever the process happened to be launched from, which could
-silently point at the wrong place — e.g. `talaria.autonomous` started
-from a different working directory than the CLI/web UI. All of them now
-resolve the same `WORKSPACE_DIR` `Config.workspace_dir` does, regardless
-of process cwd.)
+Skills that persist their own state (`state_store`, `simple_scheduler`,
+`shift_log`) do it through `talaria/json_store.py`, which saves under
+`WORKSPACE_DIR/state/` — use `load_json`/`save_json` from there in a new
+skill that needs its own persistent file, rather than hand-rolling
+`open()`/`json.load()` again. (Older versions of these skills used a
+`./state` folder relative to wherever the process happened to be launched
+from, which could silently point at the wrong place — e.g.
+`talaria.autonomous` started from a different working directory than the
+CLI/web UI. All of them now resolve the same `WORKSPACE_DIR`
+`Config.workspace_dir` does, regardless of process cwd.)
 
-**The "learning suite"** — `errbook` (error signature → working solution,
-fuzzy lookup), `idea_lab` (hypothesis/experiment tracking with `lab_next`
-advice), `feedback_loop` (rated outcomes with a weak-area report), and
-`meaning_cache` (TTL'd cache for expensive results like web searches) —
-are the four skills Autonomous mode's `_skill_context` reads back from
-automatically (see above); everything else here is purely on-demand, the
-model has to decide to call it.
+The **learning suite** (`errbook`/`idea_lab`/`feedback_loop`/`meaning_cache`)
+used to live here as four skills; they're now built-in tools instead —
+see [Learning suite](#learning-suite) above — so a plain Talaria checkout
+has them without dropping anything into `SKILLS_DIR`.
 
 **Everything else**, roughly: `image_tools`/`office_files`/`pdf_tools`
 handle images, Office documents and PDFs; `state_store` is a generic
 key-value store for anything that doesn't fit one of the above;
-`simple_scheduler` and `shift_log` are a task queue and session-handoff
-log respectively (both documented as needing a manual call — neither
-wakes itself up or is wired into the autonomous loop); `diverge` is a
-stateless creativity aid (random stimulus/persona/prompt-card generators)
-feeding `idea_lab`.
+`simple_scheduler` is a task queue whose `task_tick` Autonomous mode now
+calls automatically (see [Autonomous mode](#autonomous-mode)) — a task
+queued once genuinely runs on schedule as long as that process is up;
+`shift_log` is a session-handoff log, still purely on-demand (no
+automatic wiring); `diverge` is a stateless creativity aid (random
+stimulus/persona/prompt-card generators) feeding `idea_lab`.
 
 ### Self-authored skills
 
@@ -1083,10 +1125,10 @@ talaria/
   tools/
     web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
     goals.py, cron.py, checkpoint.py, delegate.py, procedure.py,
-    skill_authoring.py, registry.py, confirmation.py, state_lock.py
+    skill_authoring.py, registry.py, confirmation.py, state_lock.py,
+    errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py   # the "learning suite" — see above
 skills/
   example_time.py, roman_numerals.py, wolfram_alpha.py   # small example skills
-  errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py   # the "learning suite" — see Skills above
   image_tools.py, office_files.py, pdf_tools.py   # document/media helpers
   state_store.py, simple_scheduler.py, shift_log.py, diverge.py   # misc utilities
 tests/

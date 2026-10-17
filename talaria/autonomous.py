@@ -14,22 +14,24 @@ the full, unfiltered tool set again) — an unattended run with nobody to
 answer the y/N confirmation those normally require must never be able to
 silently run code or grab new capabilities on its own. It can still
 read/write workspace files, and use the goal tree, notes, checkpoints,
-and any already-installed skill (those were security-reviewed when
-approved via propose_skill in an earlier, attended session).
+the learning suite, and any already-installed skill (those were
+security-reviewed when approved via propose_skill in an earlier,
+attended session).
 
 Before each check-in's own agent runs, _skill_context pulls in whatever
-the optional errbook/idea_lab/feedback_loop skills (skills/errbook.py,
-skills/idea_lab.py, skills/feedback_loop.py) already know that's relevant
-to the current focus — a matching past error+solution, outstanding
-iteration-lab advice, a feedback report flagging a weak area — and folds
-it into the prompt. Those skills' own lookup tools (errbook_lookup,
-lab_next, feedback_report) already existed and worked fine called by
-hand, but nothing in the unattended loop ever called them on its own, so
-whatever they'd learned sat there unread tick after tick. This is
-deliberately duck-typed by tool name against whatever's actually in the
-check-in's own (already EXCLUDED_TOOLS-filtered) tool list, not a hard
-import of skills/ — those are optional plugins, and a deployment without
-one (or without skills/ at all) just skips that piece.
+the learning suite (talaria/tools/errbook.py, talaria/tools/idea_lab.py,
+talaria/tools/feedback_loop.py — core tools, always present) already
+knows that's relevant to the current focus — a matching past
+error+solution, outstanding iteration-lab advice, a feedback report
+flagging a weak area — and folds it into the prompt. Those tools' own
+lookups (errbook_lookup, lab_next, feedback_report) already existed and
+worked fine called by hand, but nothing in the unattended loop ever
+called them on its own, so whatever they'd learned sat there unread tick
+after tick. This stays duck-typed by tool name against whatever's
+actually in the check-in's own (already EXCLUDED_TOOLS-filtered) tool
+list rather than a hard import — harmless now that these are core (the
+lookup is just never missing), and it still means a third-party skill
+exposing the same tool names would be picked up automatically.
 """
 
 import json
@@ -75,6 +77,18 @@ PROMPT_TEMPLATE = (
     "{focus}"
 )
 
+# Used instead of PROMPT_TEMPLATE when there's no active goal but the
+# scheduler (skills/simple_scheduler.py, if installed) has a task due —
+# see _due_tasks below for why this path exists at all.
+NO_GOAL_PROMPT_TEMPLATE = (
+    "This is an unattended autonomous check-in — nobody is watching, so "
+    "{excluded} are not available this turn (they need an attended "
+    "session). There is no active goal right now, but a scheduled task is "
+    "due. Execute it using the tools you do have (documents, web, notes, "
+    "goals, checkpoints, and any already-installed skill).\n\n"
+    "{due}"
+)
+
 
 def _focus_query(focus: str) -> str:
     """Strips goal_focus()'s own scaffolding (the 'FOCUS:'/'Priority:'/
@@ -93,16 +107,16 @@ def _focus_query(focus: str) -> str:
 
 
 def _skill_context(tools: list[ToolSpec], focus: str) -> str:
-    """Pulls in whatever the optional errbook/idea_lab/feedback_loop
-    skills already know that's relevant right now, so a check-in actually
-    benefits from past lessons instead of them sitting unread in state —
-    see the module docstring. Included only when there's something
-    genuinely actionable (a real errbook match, lab hypotheses actually in
-    play, a feedback report flagging a weak spot), not unconditionally on
-    every tick — an empty lab or a clean feedback history isn't a signal
-    worth spending prompt tokens on forever. Best-effort: a skill's
-    handler raising (or not being installed at all) just means that piece
-    is skipped, never a failed check-in."""
+    """Pulls in whatever the learning suite already knows that's relevant
+    right now, so a check-in actually benefits from past lessons instead
+    of them sitting unread in state — see the module docstring. Included
+    only when there's something genuinely actionable (a real errbook
+    match, lab hypotheses actually in play, a feedback report flagging a
+    weak spot), not unconditionally on every tick — an empty lab or a
+    clean feedback history isn't a signal worth spending prompt tokens on
+    forever. Best-effort: a handler raising (or the tool not being
+    present at all, e.g. a filtered tool list in a test) just means that
+    piece is skipped, never a failed check-in."""
     by_name = {t.name: t for t in tools}
     parts = []
 
@@ -136,6 +150,27 @@ def _skill_context(tools: list[ToolSpec], focus: str) -> str:
     return "\n\n".join(parts)
 
 
+def _due_tasks(tools: list[ToolSpec]) -> str:
+    """Looks up task_tick (skills/simple_scheduler.py, if installed —
+    duck-typed by tool name, same as the learning-suite lookups above)
+    and returns its result only when something is actually due. This is
+    what actually closes that skill's own documented limitation ("the
+    agent cannot wake itself up"): without this, a task someone queued
+    with task_add just sat there until a human happened to call task_tick
+    by hand, since nothing in the unattended loop ever did. Best-effort,
+    same as _skill_context: a missing tool or a raising handler is just
+    skipped."""
+    by_name = {t.name: t for t in tools}
+    task_tick = by_name.get("task_tick")
+    if task_tick is None:
+        return ""
+    try:
+        result = task_tick.handler()
+    except Exception:
+        return ""
+    return result if "task(s) DUE" in result else ""
+
+
 _LOG_FILENAME = ".autonomous_log.json"
 # Written while a check-in is actually running, removed right after — this
 # process is entirely separate from the web UI's (see module docstring), so
@@ -166,14 +201,19 @@ def build_autonomous_tools(config: Config, provider: Provider) -> list[ToolSpec]
 
 def tick(config: Config, provider: Provider, usage: UsageTracker) -> str | None:
     """Run one autonomous check-in. Returns the reply, or None if there
-    was no active goal to work on (nothing is logged in that case)."""
+    was nothing actionable — no active goal and no scheduled task due
+    (nothing is logged in that case)."""
     focus = goal_focus(config.workspace_dir)
-    if focus.startswith("(no active goals"):
-        print(f"[autonomous] {focus}")
-        return None
+    no_goal = focus.startswith("(no active goals")
 
     role = config.default_role if config.default_role in ROLES else DEFAULT_ROLE
     tools = build_autonomous_tools(config, provider)
+    due_tasks = _due_tasks(tools)
+
+    if no_goal and not due_tasks:
+        print(f"[autonomous] {focus}")
+        return None
+
     agent = Agent(
         provider, tools, system=build_system(role, config.notes_file),
         max_turns=config.max_turns, usage=usage,
@@ -182,11 +222,17 @@ def tick(config: Config, provider: Provider, usage: UsageTracker) -> str | None:
     started = datetime.now(timezone.utc).isoformat()
     print(f"\n[autonomous] check-in at {started}")
     print(f"[autonomous] {focus}")
-    prompt = PROMPT_TEMPLATE.format(excluded=", ".join(sorted(EXCLUDED_TOOLS)), focus=focus)
-    skill_context = _skill_context(tools, focus)
-    if skill_context:
-        print(f"[autonomous] relevant skill context:\n{skill_context}")
-        prompt += "\n\n" + skill_context
+    if no_goal:
+        prompt = NO_GOAL_PROMPT_TEMPLATE.format(excluded=", ".join(sorted(EXCLUDED_TOOLS)), due=due_tasks)
+    else:
+        prompt = PROMPT_TEMPLATE.format(excluded=", ".join(sorted(EXCLUDED_TOOLS)), focus=focus)
+        skill_context = _skill_context(tools, focus)
+        if skill_context:
+            print(f"[autonomous] relevant skill context:\n{skill_context}")
+            prompt += "\n\n" + skill_context
+        if due_tasks:
+            print(f"[autonomous] due tasks:\n{due_tasks}")
+            prompt += "\n\nSCHEDULED TASKS DUE:\n" + due_tasks
     _write_status(config.workspace_dir, {"started": started, "focus": focus})
     try:
         reply = agent.run(prompt)
