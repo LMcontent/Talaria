@@ -29,8 +29,9 @@ services:
       # named volume above):
       #   - ./workspace:/data/workspace
       #
-      # Edit skills/ on the host without rebuilding the image:
+      # Edit skills/ or agent_skills/ on the host without rebuilding the image:
       #   - ./skills:/app/skills:ro
+      #   - ./agent_skills:/app/agent_skills:ro
     restart: unless-stopped
 
   autonomous:

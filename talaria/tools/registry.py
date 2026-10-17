@@ -1,6 +1,7 @@
 from talaria.config import Config
 from talaria.providers.base import Provider, ToolSpec
 from talaria.skills import load_skills
+from talaria.tools.agent_skills import make_agent_skills_tools
 from talaria.tools.browser import make_browser_tools
 from talaria.tools.checkpoint import make_checkpoint_tools
 from talaria.tools.code_exec import Confirmation, make_code_tool, make_install_package_tool
@@ -52,6 +53,10 @@ def build_tools(
         *make_feedback_tools(config.workspace_dir),
         *make_meaning_cache_tools(config.workspace_dir),
         *load_skills(config.skills_dir),
+        # Anthropic "Agent Skills" (SKILL.md + bundled files) — a separate,
+        # markdown-based format from the ToolSpec plugins above. See
+        # talaria/agent_skills.py.
+        *make_agent_skills_tools(config.agent_skills_dir),
     ]
 
     delegate_tool = make_delegate_tool(

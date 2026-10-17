@@ -49,6 +49,12 @@ class Config:
     google_search_api_key: str | None = None
     google_search_cx: str | None = None
 
+    # Anthropic "Agent Skills" (SKILL.md + bundled files, see
+    # talaria/agent_skills.py) — a different, markdown-based format from
+    # skills_dir's own ToolSpec plugins. Defaulted (unlike skills_dir)
+    # so existing Config(...) call sites don't need updating.
+    agent_skills_dir: str = "./agent_skills"
+
 
 def _parse_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
@@ -103,4 +109,5 @@ def load_config() -> Config:
         browser_headless=_parse_bool(os.environ.get("BROWSER_HEADLESS", "true")),
         google_search_api_key=os.environ.get("GOOGLE_SEARCH_API_KEY"),
         google_search_cx=os.environ.get("GOOGLE_SEARCH_CX"),
+        agent_skills_dir=os.environ.get("AGENT_SKILLS_DIR", "./agent_skills"),
     )

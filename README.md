@@ -835,6 +835,52 @@ capability the agent can call forever is a bigger decision than one
 mode (see "Streaming and code execution" above), which skips this gate
 too, including its RISKY-verdict branch.
 
+### Agent Skills (SKILL.md)
+
+Talaria can also load [Anthropic's Agent Skills](https://github.com/anthropics/skills)
+format — a folder per skill, scanned from `AGENT_SKILLS_DIR` (default
+`./agent_skills`; see `agent_skills/hello-world` for a minimal worked
+example), each containing a `SKILL.md`:
+
+```markdown
+---
+name: my-skill
+description: One line saying what it does and when to use it.
+license: MIT        # optional
+---
+
+Markdown instructions for the model to follow, optionally referencing
+bundled files alongside this one (scripts/, templates/, reference docs).
+```
+
+**This is a genuinely different mechanism from `SKILLS_DIR`'s own
+skills**, not a second copy of the same idea: a `SKILLS_DIR` skill is
+Python defining a `TOOLS` list, loaded as one new callable tool per
+entry; a `SKILL.md` is markdown with no code of its own — the model reads
+it and carries out the instructions using tools it already has
+(`run_python`, `read_document`/`write_document`, ...). That also means
+Talaria never executes anything from inside a `SKILL.md` directly; it
+only ever hands the model text to read.
+
+Three tools expose this, matching the format's own "progressive
+disclosure" design so a dozen installed skills don't bloat every prompt:
+`list_agent_skills` shows just name + one-line description;
+`use_skill(name)` loads one skill's full instructions plus a list of its
+bundled files, only when the model decides it's relevant; `read_skill_file(name, path)`
+reads one of those bundled files (path relative to that skill's own
+directory, traversal outside it refused the same way `read_document` is
+sandboxed to `WORKSPACE_DIR`). A bundled `.py` script is read this way
+and then executed by passing its text to `run_python` — same
+confirmation gate as any other code it runs, and still excluded from
+Autonomous mode and cron jobs for the same reason `run_python` is (see
+Autonomous mode above); the three Agent Skills tools themselves stay
+available there since they're read-only.
+
+Skills are scanned once at startup, same as `SKILLS_DIR` — restart to
+pick up a new or edited skill folder. A folder whose `SKILL.md` has no
+valid frontmatter, or is missing `description`, is skipped with a
+printed warning rather than failing the whole load.
+
 ## What the agent can do
 
 ### Tools available to the agent
@@ -848,9 +894,11 @@ too, including its RISKY-verdict branch.
 - `goal_add`, `goal_update`, `goal_list`, `goal_focus` — the persistent goal tree, see Goals above
 - `checkpoint_save`, `checkpoint_restore`, `checkpoint_list`, `checkpoint_discard` — snapshot/restore persistent state, see Checkpoints above
 - `cron_add`, `cron_list`, `cron_remove`, `cron_toggle` — schedule unattended check-ins, see Cron jobs above
+- `errbook_add`/`errbook_lookup`/`errbook_list`, `lab_hyp`/`lab_exp`/`lab_show`/`lab_next`, `feedback_rate`/`feedback_report`, `cache_put`/`cache_get`/`cache_list`/`cache_clear` — the learning suite, see Learning suite above
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 - `run_procedure` — run a bounded, repetitive tool-calling procedure as a compact state machine instead of a growing conversation, see below
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
+- `list_agent_skills`, `use_skill`, `read_skill_file` — browse and load Anthropic Agent Skills (SKILL.md), see below
 
 ### Browsing like a human — interactive sessions and logins
 
@@ -1106,6 +1154,7 @@ talaria/
   roles.py                       # built-in system-prompt presets, switchable with /role
   system_prompt.py                # builds the system prompt for a role (+ memory hint)
   skills.py                         # loads pluggable tools from SKILLS_DIR
+  agent_skills.py                     # loads SKILL.md folders from AGENT_SKILLS_DIR
   security_review.py                 # model-based review call used by propose_skill
   usage.py                            # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
   sandbox.py                           # the dedicated venv run_python/install_package use
@@ -1126,11 +1175,14 @@ talaria/
     web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
     goals.py, cron.py, checkpoint.py, delegate.py, procedure.py,
     skill_authoring.py, registry.py, confirmation.py, state_lock.py,
-    errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py   # the "learning suite" — see above
+    errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py,   # the "learning suite" — see above
+    agent_skills.py   # list_agent_skills/use_skill/read_skill_file — see Agent Skills above
 skills/
   example_time.py, roman_numerals.py, wolfram_alpha.py   # small example skills
   image_tools.py, office_files.py, pdf_tools.py   # document/media helpers
   state_store.py, simple_scheduler.py, shift_log.py, diverge.py   # misc utilities
+agent_skills/
+  hello-world/   # SKILL.md + scripts/greet.py — worked example, see Agent Skills above
 tests/
   conftest.py              # ScriptedProvider/RaisingProvider fakes shared by the suite
   test_*.py                  # see Tests above
