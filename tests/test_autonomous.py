@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from talaria.autonomous import EXCLUDED_TOOLS, _focus_query, _skill_context, build_autonomous_tools, main, tick
+from talaria.autonomous import EXCLUDED_TOOLS, _due_tasks, _focus_query, _skill_context, build_autonomous_tools, main, tick
 from talaria.config import Config
 from talaria.providers.base import ProviderResponse, ToolSpec
 from talaria.usage import UsageTracker
@@ -193,29 +193,14 @@ def test_skill_context_skips_a_skill_whose_handler_raises(tmp_path):
     assert "RELEVANT PAST LESSON" not in result
 
 
-_FAKE_ERRBOOK_SKILL = '''
-from talaria.providers.base import ToolSpec
-
-def errbook_lookup(query="", min_score="0.45"):
-    return "MATCH #1 (coverage 0.80, 2/2 query terms):\\nERROR: niche research stalled\\nSOLUTION: try a narrower keyword set\\n(used 3x)"
-
-TOOLS = [
-    ToolSpec(
-        name="errbook_lookup",
-        description="d",
-        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
-        handler=errbook_lookup,
-    )
-]
-'''
-
-
 def test_tick_folds_a_real_errbook_match_into_the_prompt(tmp_path):
     config = make_config(tmp_path)
     os.makedirs(config.workspace_dir, exist_ok=True)
-    (tmp_path / "skills" / "errbook.py").write_text(_FAKE_ERRBOOK_SKILL)
+    from talaria.tools.errbook import errbook_add
     from talaria.tools.goals import goal_add
 
+    errbook_add(config.workspace_dir, error_signature="research niche stalled",
+                solution="try a narrower keyword set")
     goal_add(config.workspace_dir, title="Research a niche", priority="high")
 
     provider = ScriptedProvider([ProviderResponse(text="used the past lesson", tool_calls=[])])
@@ -227,9 +212,9 @@ def test_tick_folds_a_real_errbook_match_into_the_prompt(tmp_path):
 
 
 def test_tick_prompt_has_no_skill_context_section_without_a_signal(tmp_path):
-    # Same shape as the happy-path test above but with no errbook/lab/
-    # feedback skills installed at all — must not add an empty or
-    # malformed section to the prompt.
+    # Same shape as the happy-path test above but with an empty learning
+    # suite (no errbook entries, no lab hypotheses, no feedback ratings)
+    # — must not add an empty or malformed section to the prompt.
     config = make_config(tmp_path)
     os.makedirs(config.workspace_dir, exist_ok=True)
     from talaria.tools.goals import goal_add
@@ -243,3 +228,72 @@ def test_tick_prompt_has_no_skill_context_section_without_a_signal(tmp_path):
     assert "RELEVANT PAST LESSON" not in sent_prompt
     assert "ITERATION LAB ADVICE" not in sent_prompt
     assert "FEEDBACK SIGNAL" not in sent_prompt
+
+
+def test_due_tasks_returns_the_due_block(tmp_path):
+    tools = [_tool("task_tick", lambda: "1 task(s) DUE - execute these now:\n\n[#1] ping\nINSTRUCTION: say hi")]
+    assert "INSTRUCTION: say hi" in _due_tasks(tools)
+
+
+def test_due_tasks_empty_when_nothing_due(tmp_path):
+    tools = [_tool("task_tick", lambda: "No active tasks.")]
+    assert _due_tasks(tools) == ""
+
+
+def test_due_tasks_empty_when_scheduler_not_installed(tmp_path):
+    assert _due_tasks([]) == ""
+
+
+def test_due_tasks_skips_a_handler_that_raises(tmp_path):
+    def boom():
+        raise RuntimeError("broken scheduler")
+
+    assert _due_tasks([_tool("task_tick", boom)]) == ""
+
+
+_FAKE_SCHEDULER_SKILL = '''
+from talaria.providers.base import ToolSpec
+
+def task_tick():
+    return "1 task(s) DUE - execute these now:\\n\\n[#1] water the plants\\nINSTRUCTION: remind the user"
+
+TOOLS = [
+    ToolSpec(
+        name="task_tick",
+        description="d",
+        input_schema={"type": "object", "properties": {}},
+        handler=task_tick,
+    )
+]
+'''
+
+
+def test_tick_runs_for_a_due_task_even_without_an_active_goal(tmp_path):
+    config = make_config(tmp_path)
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    (tmp_path / "skills" / "scheduler.py").write_text(_FAKE_SCHEDULER_SKILL)
+
+    provider = ScriptedProvider([ProviderResponse(text="watered them", tool_calls=[])])
+    result = tick(config, provider, UsageTracker())
+
+    assert result == "watered them"
+    sent_prompt = provider.calls[0]["history"][0]["content"]
+    assert "remind the user" in sent_prompt
+    assert "no active goal" in sent_prompt
+
+
+def test_tick_folds_due_tasks_in_alongside_an_active_goal(tmp_path):
+    config = make_config(tmp_path)
+    os.makedirs(config.workspace_dir, exist_ok=True)
+    (tmp_path / "skills" / "scheduler.py").write_text(_FAKE_SCHEDULER_SKILL)
+    from talaria.tools.goals import goal_add
+
+    goal_add(config.workspace_dir, title="Earn money", priority="high")
+
+    provider = ScriptedProvider([ProviderResponse(text="did both", tool_calls=[])])
+    tick(config, provider, UsageTracker())
+
+    sent_prompt = provider.calls[0]["history"][0]["content"]
+    assert "Earn money" in sent_prompt
+    assert "SCHEDULED TASKS DUE" in sent_prompt
+    assert "remind the user" in sent_prompt

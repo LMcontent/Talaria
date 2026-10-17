@@ -1,10 +1,11 @@
 """Snapshot/restore the agent's persistent state around a risky experiment.
 
 Two roots get captured together, because both can end up polluted by a bad
-experiment: `workspace_dir` (conversation history, notes, written files) and
-`./state` (relative to the process's cwd — where most skills persist their
-own JSON, e.g. errbook/feedback_loop/meaning_cache). Restoring only one of
-the two would leave stale "lessons" from the bad run in the other.
+experiment: `workspace_dir` (conversation history, notes, goals, the
+learning suite's own state, written files) and `./state` (relative to the
+process's cwd — where any remaining skill persists its own JSON, e.g.
+simple_scheduler/shift_log/state_store). Restoring only one of the two
+would leave stale "lessons" from the bad run in the other.
 
 checkpoint_save/checkpoint_restore hold STATE_LOCK (talaria/tools/state_lock.py)
 for their whole multi-step copy, so they can't race the JSON-state tools

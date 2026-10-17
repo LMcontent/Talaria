@@ -1,15 +1,26 @@
 # -*- coding: utf-8 -*-
 """Simple task scheduler: a persistent task queue with due times.
 
-Limitation handled honestly: the agent cannot wake itself up. Tasks become
-actionable when a session runs `task_tick` (e.g. at the start of a dialog):
-it returns due tasks with their instructions for immediate execution.
-Recurring tasks reschedule themselves by an hourly interval.
+The one-session limitation is no longer absolute: talaria/autonomous.py's
+unattended check-in loop calls task_tick on every wake-up (duck-typed by
+tool name, same as it already does for the learning suite) and executes
+whatever comes back due — so a task set up in one session genuinely gets
+picked up on its own, as long as AUTONOMOUS_MODE is running. Without that
+loop running, the old limitation still applies: tasks become actionable
+when a session runs `task_tick` (e.g. at the start of a dialog), which
+returns due tasks with their instructions for immediate execution.
+Recurring tasks reschedule themselves by their own interval.
+
+Guarded by STATE_LOCK (shared with the core tools) since agent.py can run
+several tool calls concurrently within one turn — two task_add calls, or a
+task_add racing a task_tick, must not read-modify-write the same
+tasks.json unsynchronized.
 """
 from datetime import datetime, timedelta, timezone
 
 import talaria.providers.base as base
 from talaria.json_store import load_json, save_json
+from talaria.tools.state_lock import STATE_LOCK
 
 ToolSpec = base.ToolSpec
 
@@ -63,26 +74,28 @@ def task_add(name: str = "", instruction: str = "", interval_hours: str = "", du
         except ValueError:
             return "Error: interval_hours must be a positive number."
 
+    due_iso = str(due_iso).strip()
     now = _now()
     nxt = _parse_when(due_iso)
-    if due_iso.strip() and nxt is None:
+    if due_iso and nxt is None:
         return "Error: bad due_iso format, use ISO like 2026-08-25T09:00."
     if nxt is None:
         nxt = now + timedelta(hours=rec) if rec else now
 
-    tasks = _load()
-    tid = max([t.get("id", 0) for t in tasks], default=0) + 1
-    tasks.append({
-        "id": tid,
-        "name": n,
-        "instruction": instr,
-        "interval_hours": rec,
-        "created": _iso(now),
-        "last_run": None,
-        "next_run": _iso(nxt),
-        "status": "active",
-    })
-    _save(tasks)
+    with STATE_LOCK:
+        tasks = _load()
+        tid = max([t.get("id", 0) for t in tasks], default=0) + 1
+        tasks.append({
+            "id": tid,
+            "name": n,
+            "instruction": instr,
+            "interval_hours": rec,
+            "created": _iso(now),
+            "last_run": None,
+            "next_run": _iso(nxt),
+            "status": "active",
+        })
+        _save(tasks)
     kind = "recurring every {}h".format(rec) if rec else "one-time"
     return "Task #{} '{}' added ({}). First run due: {}".format(tid, n, kind, _iso(nxt))
 
@@ -110,40 +123,41 @@ def task_list(key: str = "") -> str:
 
 def task_tick(key: str = "") -> str:
     """Return DUE tasks with instructions for execution; reschedule recurring ones."""
-    tasks = _load()
-    if not tasks:
-        return "(no tasks)"
-    now = _now()
-    due_lines = []
-    changed = False
-    for t in tasks:
-        if t.get("status") != "active":
-            continue
-        nxt = _parse_when(t.get("next_run", ""))
-        if nxt is None or nxt > now:
-            continue
-        due_lines.append("[#{}] {}\nINSTRUCTION: {}".format(t.get("id"), t.get("name"), t.get("instruction")))
-        t["last_run"] = _iso(now)
-        rec = t.get("interval_hours")
-        if rec:
-            step = timedelta(hours=float(rec))
-            new_nxt = nxt + step
-            while new_nxt <= now:
-                new_nxt += step
-            t["next_run"] = _iso(new_nxt)
-        else:
-            t["status"] = "ran"
-        changed = True
-    if changed:
-        _save(tasks)
-    if not due_lines:
-        upcoming = [t for t in tasks if t.get("status") == "active"]
-        if upcoming:
-            soonest = min(upcoming, key=lambda x: x.get("next_run", ""))
-            return "No tasks due now. Next: '{}' at {}".format(soonest.get("name"), str(soonest.get("next_run"))[:16])
-        return "No active tasks."
-    header = "{} task(s) DUE - execute these now:\n\n".format(len(due_lines))
-    return header + "\n\n".join(due_lines)
+    with STATE_LOCK:
+        tasks = _load()
+        if not tasks:
+            return "(no tasks)"
+        now = _now()
+        due_lines = []
+        changed = False
+        for t in tasks:
+            if t.get("status") != "active":
+                continue
+            nxt = _parse_when(t.get("next_run", ""))
+            if nxt is None or nxt > now:
+                continue
+            due_lines.append("[#{}] {}\nINSTRUCTION: {}".format(t.get("id"), t.get("name"), t.get("instruction")))
+            t["last_run"] = _iso(now)
+            rec = t.get("interval_hours")
+            if rec:
+                step = timedelta(hours=float(rec))
+                new_nxt = nxt + step
+                while new_nxt <= now:
+                    new_nxt += step
+                t["next_run"] = _iso(new_nxt)
+            else:
+                t["status"] = "ran"
+            changed = True
+        if changed:
+            _save(tasks)
+        if not due_lines:
+            upcoming = [t for t in tasks if t.get("status") == "active"]
+            if upcoming:
+                soonest = min(upcoming, key=lambda x: x.get("next_run", ""))
+                return "No tasks due now. Next: '{}' at {}".format(soonest.get("name"), str(soonest.get("next_run"))[:16])
+            return "No active tasks."
+        header = "{} task(s) DUE - execute these now:\n\n".format(len(due_lines))
+        return header + "\n\n".join(due_lines)
 
 
 def task_done(task_id: str = "") -> str:
@@ -152,11 +166,12 @@ def task_done(task_id: str = "") -> str:
         tid = int(str(task_id).strip())
     except ValueError:
         return "Error: task_id must be an integer."
-    tasks = _load()
-    kept = [t for t in tasks if t.get("id") != tid]
-    if len(kept) == len(tasks):
-        return "Not found: task #{}".format(tid)
-    _save(kept)
+    with STATE_LOCK:
+        tasks = _load()
+        kept = [t for t in tasks if t.get("id") != tid]
+        if len(kept) == len(tasks):
+            return "Not found: task #{}".format(tid)
+        _save(kept)
     return "Task #{} removed.".format(tid)
 
 

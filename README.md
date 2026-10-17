@@ -28,7 +28,7 @@ flowchart TB
     CLI --> Agent["Agent loop<br/>(talaria/agent.py)"]
     Web --> Agent
     Cron -- reduced tool set --> Agent
-    Auto -- "reduced tool set +<br/>errbook/idea_lab/feedback_loop context" --> Agent
+    Auto -- "reduced tool set +<br/>learning-suite context + due tasks" --> Agent
 
     Agent <--> Provider["Provider<br/>Claude API or OpenAI-compatible router"]
     Agent --> Tools["Tools<br/>web · browser · documents ·<br/>code sandbox · memory · goals · skills"]
@@ -40,7 +40,7 @@ flowchart TB
     NewTool -. available to .-> Tools
 
     State -. goal_focus .-> Auto
-    State -. "errbook / idea_lab /<br/>feedback_loop lookups" .-> Auto
+    State -. "learning-suite lookups +<br/>scheduler task_tick" .-> Auto
 ```
 
 A few things worth calling out before the detail below:
@@ -204,7 +204,7 @@ it, this is just so "it behaves differently in Docker" isn't a mystery:
   Dockerfile than to weaken it for every user just to suit a container
   default.
 
-`run_python`/`install_package` confirmation prompts and `propose_skill`'s
+`run_python`/`run_shell`/`install_package` confirmation prompts and `propose_skill`'s
 security-review gate work exactly like the non-Docker setup — they print
 to **this container's own logs** (`docker compose logs -f web`), not the
 browser, same as "the terminal running the server" everywhere else in
@@ -350,7 +350,7 @@ actually cancels the in-flight request to the model, not just the display:
 the partial reply is what gets saved to history, and a "(generation
 stopped)" note is shown so it's clear it wasn't a complete answer.
 
-**Important:** confirmation prompts for `run_python`, `install_package`,
+**Important:** confirmation prompts for `run_python`, `run_shell`, `install_package`,
 and `propose_skill` still appear in the **terminal window running the server**, not in the
 browser — a chat message will just sit there "thinking…" until you answer
 in that terminal. This keeps the same safety guarantees as the CLI without
@@ -359,9 +359,9 @@ actually see, it just isn't in the browser tab).
 
 `WEB_HOST` defaults to `127.0.0.1` (localhost only) — leave it that way
 unless you specifically intend to expose this on your network. Anyone who
-can reach this port can chat with the agent, including its `run_python`
-tool (which still asks for approval in your terminal, but is still not
-something you want strangers triggering).
+can reach this port can chat with the agent, including its `run_python`/
+`run_shell` tools (which still ask for approval in your terminal, but are
+still not something you want strangers triggering).
 
 ## Memory & long-running work
 
@@ -399,8 +399,8 @@ of goals and sub-goals (each with a priority and a status) in
 instead of needing to be restated every time. `goal_list` shows the tree;
 `goal_update` changes a goal's status/priority or appends a progress note
 (goals aren't deleted on failure — set status to `dropped` and the record
-stays, the same "don't lose the history of what was tried" idea as
-`errbook`/`idea_lab`).
+stays, the same "don't lose the history of what was tried" idea as the
+learning suite's `errbook`/`idea_lab` tools below).
 
 The actually useful part is `goal_focus`: rather than the vague top-level
 objective ("earn money"), it picks the single highest-priority *active*
@@ -425,9 +425,9 @@ open: a goal tree nobody ever checks between sessions doesn't do
 anything by itself. Stop the process (or set `AUTONOMOUS_MODE=false`) to
 turn it back off.
 
-**Unattended runs never get `run_python`, `install_package`,
+**Unattended runs never get `run_python`, `run_shell`, `install_package`,
 `propose_skill`, `delegate_task`, `run_procedure`, `browser_click`, or
-`browser_type`.** The code/package/skill tools execute with your OS-level
+`browser_type`.** The code/shell/package/skill tools execute with your OS-level
 permissions and normally ask for a `y/N` confirmation in the terminal,
 which has no one to answer it when nothing is watching; `delegate_task`
 and `run_procedure` are excluded for a different reason — both build
@@ -438,9 +438,10 @@ are excluded because they can act on a real, possibly logged-in browser
 session (submit a form, send a message, spend money) with nobody watching
 to catch a mistake. An autonomous check-in can still read/write workspace
 files, browse read-only (`browser_open` and the rest), and use the goal
-tree, notes, checkpoints, and any skill you already approved through
-`propose_skill` in an earlier, attended session (those went through a
-security review when you approved them — this doesn't re-review them).
+tree, notes, checkpoints, the learning suite, and any skill you already
+approved through `propose_skill` in an earlier, attended session (those
+went through a security review when you approved them — this doesn't
+re-review them).
 
 Each check-in is logged to `WORKSPACE_DIR/.autonomous_log.json`
 (timestamp, the goal it focused on, its reply) as well as printed to the
@@ -450,19 +451,33 @@ share the CLI/web UI's conversation history, so autonomous work never
 pollutes an interactive chat; the goal tree, notes and skill state are
 what carry context from one check-in to the next instead.
 
-**Each check-in also pulls in relevant lessons from the `errbook`,
-`idea_lab`, and `feedback_loop` skills (see Skills below), if installed.**
-Those skills' lookup tools (`errbook_lookup`, `lab_next`,
-`feedback_report`) always worked fine called by hand, but nothing
-previously called them automatically in the unattended loop — whatever
-they'd learned just sat there unread, tick after tick. Before running the
-check-in's agent, a matching past error+solution, outstanding
-iteration-lab advice, or a feedback report flagging a weak area (only
-when there actually is one — an empty lab or a clean feedback history
-adds nothing) gets folded straight into the prompt. This is the one place
-in Talaria where "outcome → stored → read back automatically → changes
-the next decision" genuinely closes the loop without the model having to
-remember to check.
+**Each check-in also pulls in relevant lessons from the learning suite**
+(`errbook`, `idea_lab`, `feedback_loop` — see [Learning suite](#learning-suite)
+below; these are built-in tools, not optional skills). Their lookups
+(`errbook_lookup`, `lab_next`, `feedback_report`) always worked fine
+called by hand, but nothing previously called them automatically in the
+unattended loop — whatever they'd learned just sat there unread, tick
+after tick. Before running the check-in's agent, a matching past
+error+solution, outstanding iteration-lab advice, or a feedback report
+flagging a weak area (only when there actually is one — an empty lab or a
+clean feedback history adds nothing) gets folded straight into the
+prompt. This is one of two places in Talaria where "outcome → stored →
+read back automatically → changes the next decision" genuinely closes the
+loop without the model having to remember to check — the other is below.
+
+**Each check-in also calls `task_tick`, if `simple_scheduler` (see
+[Skills](#skills)) is installed, and executes whatever comes back due.**
+That skill's own docstring is honest about its limitation: a task queued
+with `task_add` only became actionable once *some* session happened to
+call `task_tick` by hand — nothing woke the agent up on its own. Wiring
+the autonomous loop's periodic wake-up into that exact lookup closes the
+gap: a recurring or one-time task set up once now genuinely runs on
+schedule as long as this process keeps running, no attended session
+required. This check also runs even when there's no active goal — a due
+task alone is enough to trigger a check-in (with a shorter prompt that
+just says to execute what's due), since gating entirely on `goal_focus`
+would otherwise make the scheduler useless for anyone not also using the
+goal tree.
 
 The web UI's sidebar has an "Autonomous log" section showing the most
 recent check-ins (newest first) — it's read fresh from
@@ -488,9 +503,9 @@ worth revisiting if that turns out to matter. Whichever process is up
 checks once every 30 seconds for jobs that are due.
 
 Same restrictions as autonomous mode, and for the same reason: a cron
-firing is unattended, so it never gets `run_python`, `install_package`,
-`propose_skill`, `delegate_task`, `run_procedure`, `browser_click`, or
-`browser_type`. Each firing is a fresh, short-lived agent call (not the
+firing is unattended, so it never gets `run_python`, `run_shell`,
+`install_package`, `propose_skill`, `delegate_task`, `run_procedure`,
+`browser_click`, or `browser_type`. Each firing is a fresh, short-lived agent call (not the
 web UI/CLI's own conversation) and is logged to
 `WORKSPACE_DIR/.cron_log.json`, printed to the terminal, and shown in the
 web UI sidebar's "Cron jobs" section alongside each job's schedule and
@@ -515,18 +530,48 @@ running and removed the moment it finishes.
 
 Before a risky or experimental task, ask the agent to `checkpoint_save`
 under a name — it snapshots conversation history, notes, workspace files,
-and every skill's own persisted state (errbook, feedback, caches, etc.) as
-they stand right then. If the experiment goes badly, `checkpoint_restore`
-brings all of that back to exactly that point, discarding everything
-written since — so a bad run's wrong answers, mis-learned "lessons" in a
-skill's state, or junk files never make it into the memory you keep using
-afterwards. `checkpoint_list` shows saved checkpoints, `checkpoint_discard`
-deletes one you no longer need.
+the learning suite's own state, and any remaining skill's persisted state
+(caches, task queues, etc.) as they stand right then. If the experiment
+goes badly, `checkpoint_restore` brings all of that back to exactly that
+point, discarding everything written since — so a bad run's wrong
+answers, mis-learned "lessons", or junk files never make it into the
+memory you keep using afterwards. `checkpoint_list` shows saved
+checkpoints, `checkpoint_discard` deletes one you no longer need.
 
 Restoring only rewrites files on disk — it can't reach into the current
 process's already-loaded conversation, so run `/reset` (or start a new
 session) right after a restore to make the rollback actually take effect
 in what the agent remembers.
+
+### Learning suite
+
+Four built-in tools the agent can use to actually learn something across
+sessions, instead of starting cold every time:
+
+- **`errbook`** (`errbook_add`/`errbook_lookup`/`errbook_list`) — save an
+  error signature plus the solution that actually fixed it; `errbook_lookup`
+  fuzzy-matches a paraphrased description against past entries (query
+  coverage, not exact text) so a rephrased version of a known problem
+  still finds its fix.
+- **`idea_lab`** (`lab_hyp`/`lab_exp`/`lab_show`/`lab_next`) — a visible
+  hypothesis/experiment journal for iterative work; `lab_next` looks at
+  the pattern of keeps/pivots/drops so far and suggests the next concrete
+  move instead of leaving "what do I try next" up in the air.
+- **`feedback_loop`** (`feedback_rate`/`feedback_report`) — the only
+  *external* signal the agent has: rate a result 1-5 and `feedback_report`
+  aggregates by task type (worst first), flagging a weak area once its
+  mean drops below 4.0.
+- **`meaning_cache`** (`cache_put`/`cache_get`/`cache_list`/`cache_clear`) —
+  a TTL'd, fuzzy-matched cache for expensive results (web searches, parsed
+  pages) so a near-duplicate request doesn't repeat the same work.
+
+All four persist to their own file directly under `WORKSPACE_DIR`
+(`.errbook.json`, `.idea_lab.json`, `.feedback.json`, `.meaning_cache.json`),
+same convention as `.goals.json`/`.cron.json`, and are built-in — no
+`SKILLS_DIR` entry needed. [Autonomous mode](#autonomous-mode) reads
+`errbook_lookup`/`lab_next`/`feedback_report` back automatically on every
+check-in (see there for why); everything else here is purely on-demand,
+the model has to decide to call it.
 
 ## Safety, streaming & performance
 
@@ -535,19 +580,20 @@ in what the agent remembers.
 Responses are streamed to the terminal as they're generated (for both
 providers), instead of waiting for the full answer.
 
-`run_python` asks for a `y/N` confirmation in the terminal before actually
-running any code the model generated — the code runs with your OS-level
-permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
-in `.env` to skip the prompt (only if you fully trust the model/provider).
+`run_python` and `run_shell` both ask for a `y/N` confirmation in the
+terminal before actually running any code/command the model generated —
+both run with your OS-level permissions, so review before approving. Set
+`CONFIRM_CODE_EXEC=false` in `.env` to skip the prompt for both (only if
+you fully trust the model/provider).
 
 In the web UI, the sidebar's **Settings** control is a three-way
 Safe / Extreme / Mega Extreme switch, overriding `CONFIRM_CODE_EXEC` live
 for the running session (no restart needed, takes effect on the very next
 tool call):
 
-- **Safe** (default): `run_python`/`install_package` ask for `y/N`
+- **Safe** (default): `run_python`/`run_shell`/`install_package` ask for `y/N`
   confirmation, same as the CLI.
-- **Extreme**: those two execute immediately, no prompt.
+- **Extreme**: those three execute immediately, no prompt.
 - **Mega Extreme**: Extreme, plus `propose_skill` also saves and loads a
   new skill with no confirmation — including one the automatic security
   review flagged **RISKY**. `propose_skill`'s confirmation is otherwise a
@@ -587,7 +633,7 @@ call's latency serially now only pays for the slowest one. All the pending
 tool-call panels appear up front, in request order, then fill in with
 their results as each one actually finishes — which, since they're
 running in parallel, isn't necessarily the same order they were announced
-in. The interactive `run_python`/`install_package`/`propose_skill`
+in. The interactive `run_python`/`run_shell`/`install_package`/`propose_skill`
 confirmation prompt and the small JSON-backed state files (`remember`,
 goals, cron jobs, checkpoints) stay safe under this: concurrent
 confirmation prompts queue up one at a time in the terminal instead of
@@ -675,6 +721,33 @@ up for you.
 
 Check what's installed anytime with `/venv` in the CLI.
 
+### Shell access (run_shell)
+
+`run_python`'s sandbox is deliberately narrow: a 15-second timeout and a
+fresh subprocess on every call, fine for a quick snippet but useless for
+`git clone`, a real test suite, or any build/package-manager command that
+takes longer or needs actual shell semantics (pipes, `&&`, globbing).
+`run_shell` covers that gap — plain `bash`, default 120s timeout
+(`timeout_seconds` raises it, capped at 600), same `y/N` confirmation gate
+and `CONFIRM_CODE_EXEC`/Safe-Extreme-Mega-Extreme wiring as `run_python`.
+
+**Unlike `run_python`, it is NOT routed through the sandbox venv** —
+there's no package isolation to speak of here, it's just a shell in
+`WORKSPACE_DIR` (or wherever a previous `cd` left it) with Talaria's own
+OS-level permissions, the same no-sandbox-against-a-malicious-model
+caveat as above. The working directory is the one thing that persists
+across calls within a run (`cd project && npm install` in one call, then
+plain `npm test` in the next, without repeating the `cd`) — not a live
+interactive process, no backgrounded dev server, no environment
+variables surviving between calls. `shell_reset` (no confirmation needed,
+it doesn't run anything) snaps it back to the workspace root. A fresh
+process — a new CLI/web session, a new autonomous tick, a fresh
+`delegate_task` sub-agent — always starts back at the workspace root,
+same as `run_python` already resets every call.
+
+Excluded from Autonomous mode and cron jobs for the same reason
+`run_python` is (see above) — unattended runs never get either.
+
 ### Usage / session token limit
 
 Talaria counts tokens (input + output) across the whole session, including
@@ -737,34 +810,31 @@ flat (no subfolders) — at the current count (about a dozen files) that's
 still easy to scan with a plain `ls skills/`; the groupings below are
 just for this README, not a directory layout.
 
-Skills that persist their own state (`state_store`, `errbook`, `idea_lab`,
-`feedback_loop`, `meaning_cache`, `simple_scheduler`, `shift_log`) do it
-through `talaria/json_store.py`, which saves under `WORKSPACE_DIR/state/`
-— use `load_json`/`save_json` from there in a new skill that needs its
-own persistent file, rather than hand-rolling `open()`/`json.load()`
-again. (Older versions of these skills used a `./state` folder relative
-to wherever the process happened to be launched from, which could
-silently point at the wrong place — e.g. `talaria.autonomous` started
-from a different working directory than the CLI/web UI. All of them now
-resolve the same `WORKSPACE_DIR` `Config.workspace_dir` does, regardless
-of process cwd.)
+Skills that persist their own state (`state_store`, `simple_scheduler`,
+`shift_log`) do it through `talaria/json_store.py`, which saves under
+`WORKSPACE_DIR/state/` — use `load_json`/`save_json` from there in a new
+skill that needs its own persistent file, rather than hand-rolling
+`open()`/`json.load()` again. (Older versions of these skills used a
+`./state` folder relative to wherever the process happened to be launched
+from, which could silently point at the wrong place — e.g.
+`talaria.autonomous` started from a different working directory than the
+CLI/web UI. All of them now resolve the same `WORKSPACE_DIR`
+`Config.workspace_dir` does, regardless of process cwd.)
 
-**The "learning suite"** — `errbook` (error signature → working solution,
-fuzzy lookup), `idea_lab` (hypothesis/experiment tracking with `lab_next`
-advice), `feedback_loop` (rated outcomes with a weak-area report), and
-`meaning_cache` (TTL'd cache for expensive results like web searches) —
-are the four skills Autonomous mode's `_skill_context` reads back from
-automatically (see above); everything else here is purely on-demand, the
-model has to decide to call it.
+The **learning suite** (`errbook`/`idea_lab`/`feedback_loop`/`meaning_cache`)
+used to live here as four skills; they're now built-in tools instead —
+see [Learning suite](#learning-suite) above — so a plain Talaria checkout
+has them without dropping anything into `SKILLS_DIR`.
 
 **Everything else**, roughly: `image_tools`/`office_files`/`pdf_tools`
 handle images, Office documents and PDFs; `state_store` is a generic
 key-value store for anything that doesn't fit one of the above;
-`simple_scheduler` and `shift_log` are a task queue and session-handoff
-log respectively (both documented as needing a manual call — neither
-wakes itself up or is wired into the autonomous loop); `diverge` is a
-stateless creativity aid (random stimulus/persona/prompt-card generators)
-feeding `idea_lab`.
+`simple_scheduler` is a task queue whose `task_tick` Autonomous mode now
+calls automatically (see [Autonomous mode](#autonomous-mode)) — a task
+queued once genuinely runs on schedule as long as that process is up;
+`shift_log` is a session-handoff log, still purely on-demand (no
+automatic wiring); `diverge` is a stateless creativity aid (random
+stimulus/persona/prompt-card generators) feeding `idea_lab`.
 
 ### Self-authored skills
 
@@ -786,29 +856,95 @@ the top-level agent — a `delegate_task` sub-agent can't call it, so new
 tools can't be added without you seeing it happen.
 
 This confirmation is independent of the CLI's `CONFIRM_CODE_EXEC` and the
-web UI's Safe/Extreme mode (both scoped to `run_python`/`install_package`
-only) — it always asks, in either mode, since permanently adding a new
+web UI's Safe/Extreme mode (both scoped to `run_python`/`run_shell`/
+`install_package` only) — it always asks, in either mode, since permanently adding a new
 capability the agent can call forever is a bigger decision than one
 `run_python` call. The one exception is the web UI's **Mega Extreme**
 mode (see "Streaming and code execution" above), which skips this gate
 too, including its RISKY-verdict branch.
 
+### Agent Skills (SKILL.md)
+
+Talaria can also load [Anthropic's Agent Skills](https://github.com/anthropics/skills)
+format — a folder per skill, scanned from `AGENT_SKILLS_DIR` (default
+`./agent_skills`; see `agent_skills/hello-world` for a minimal worked
+example), each containing a `SKILL.md`:
+
+```markdown
+---
+name: my-skill
+description: One line saying what it does and when to use it.
+license: MIT        # optional
+---
+
+Markdown instructions for the model to follow, optionally referencing
+bundled files alongside this one (scripts/, templates/, reference docs).
+```
+
+**This is a genuinely different mechanism from `SKILLS_DIR`'s own
+skills**, not a second copy of the same idea: a `SKILLS_DIR` skill is
+Python defining a `TOOLS` list, loaded as one new callable tool per
+entry; a `SKILL.md` is markdown with no code of its own — the model reads
+it and carries out the instructions using tools it already has
+(`run_python`/`run_shell`, `read_document`/`write_document`, ...). That also means
+Talaria never executes anything from inside a `SKILL.md` directly; it
+only ever hands the model text to read.
+
+Three tools expose this, matching the format's own "progressive
+disclosure" design so a dozen installed skills don't bloat every prompt:
+`list_agent_skills` shows just name + one-line description;
+`use_skill(name)` loads one skill's full instructions plus a list of its
+bundled files, only when the model decides it's relevant; `read_skill_file(name, path)`
+reads one of those bundled files (path relative to that skill's own
+directory, traversal outside it refused the same way `read_document` is
+sandboxed to `WORKSPACE_DIR`). A bundled `.py` script is read this way
+and then executed by passing its text to `run_python` — same
+confirmation gate as any other code it runs, and still excluded from
+Autonomous mode and cron jobs for the same reason `run_python` is (see
+Autonomous mode above); the three Agent Skills tools themselves stay
+available there since they're read-only.
+
+Skills are scanned once at startup, same as `SKILLS_DIR` — restart to
+pick up a new or edited skill folder. A folder whose `SKILL.md` has no
+valid frontmatter, or is missing `description`, is skipped with a
+printed warning rather than failing the whole load.
+
 ## What the agent can do
 
 ### Tools available to the agent
 
+The web UI's sidebar has a **Tools** panel listing every one of these
+(`/api/tools`), grouped into the same categories as the list below —
+collapsed by default and showing just a count, since at ~80 built-in
+tools plus whatever's in `SKILLS_DIR`/`AGENT_SKILLS_DIR` this is
+reference material, not something worth a full scroll on every page
+load. Click a category to expand it; a tool whose full description runs
+long is shown truncated to roughly its first sentence, with the rest a
+hover away. The handful of tools that actually pause and ask for a `y/N`
+confirmation before doing anything (`run_python`, `run_shell`,
+`install_package`, `propose_skill` — see "Streaming and code execution"
+below) carry a small **confirms** badge, so they stand out from the
+rest rather than blending into an alphabetical wall of text. A tool
+Talaria doesn't recognize (any `SKILLS_DIR` skill, including one you
+write yourself) falls into a catch-all **Skills** category rather than
+being dropped — see `talaria/tool_categories.py` if you want to give a
+new core tool a more specific one.
+
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed by default, uses DuckDuckGo HTML; optionally Google's Custom Search API instead, see `GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`). Fast, but can't run JavaScript or interact with a page.
 - `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log`, `browser_reset` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human" below.
-- `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
+- `read_document`, `write_document`, `edit_document`, `list_files` — read/write/patch `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`; `edit_document` replaces one exact, unique chunk of an existing file instead of resending the whole thing, see above
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
+- `run_shell`, `shell_reset` — run an actual shell command (git, build tools, test runners — anything run_python's 15s Python-only sandbox can't handle), working directory persists across calls; same confirmation gate as run_python, see above
 - `remember`, `recall`, `forget` — long-term memory across sessions, see above
 - `goal_add`, `goal_update`, `goal_list`, `goal_focus` — the persistent goal tree, see Goals above
 - `checkpoint_save`, `checkpoint_restore`, `checkpoint_list`, `checkpoint_discard` — snapshot/restore persistent state, see Checkpoints above
 - `cron_add`, `cron_list`, `cron_remove`, `cron_toggle` — schedule unattended check-ins, see Cron jobs above
+- `errbook_add`/`errbook_lookup`/`errbook_list`, `lab_hyp`/`lab_exp`/`lab_show`/`lab_next`, `feedback_rate`/`feedback_report`, `cache_put`/`cache_get`/`cache_list`/`cache_clear` — the learning suite, see Learning suite above
 - `delegate_task` — hand a self-contained sub-task to a fresh sub-agent (up to `max_delegate_depth` levels deep) and get back its answer
 - `run_procedure` — run a bounded, repetitive tool-calling procedure as a compact state machine instead of a growing conversation, see below
 - `propose_skill` — top-level agent only; author and (with your approval) load a new tool at runtime, see above
+- `list_agent_skills`, `use_skill`, `read_skill_file` — browse and load Anthropic Agent Skills (SKILL.md), see below
 
 ### Browsing like a human — interactive sessions and logins
 
@@ -1064,6 +1200,8 @@ talaria/
   roles.py                       # built-in system-prompt presets, switchable with /role
   system_prompt.py                # builds the system prompt for a role (+ memory hint)
   skills.py                         # loads pluggable tools from SKILLS_DIR
+  agent_skills.py                     # loads SKILL.md folders from AGENT_SKILLS_DIR
+  tool_categories.py                   # groups tool names for the web UI's Tools panel
   security_review.py                 # model-based review call used by propose_skill
   usage.py                            # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
   sandbox.py                           # the dedicated venv run_python/install_package use
@@ -1081,14 +1219,17 @@ talaria/
     openai_compat.py          # OpenAI-compatible router backend (streams responses)
     dns_pin.py                  # optional DNS pinning for blocked regions
   tools/
-    web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
+    web.py, browser.py, documents.py, code_exec.py, shell_exec.py, memory_tools.py,
     goals.py, cron.py, checkpoint.py, delegate.py, procedure.py,
-    skill_authoring.py, registry.py, confirmation.py, state_lock.py
+    skill_authoring.py, registry.py, confirmation.py, state_lock.py,
+    errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py,   # the "learning suite" — see above
+    agent_skills.py   # list_agent_skills/use_skill/read_skill_file — see Agent Skills above
 skills/
   example_time.py, roman_numerals.py, wolfram_alpha.py   # small example skills
-  errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py   # the "learning suite" — see Skills above
   image_tools.py, office_files.py, pdf_tools.py   # document/media helpers
   state_store.py, simple_scheduler.py, shift_log.py, diverge.py   # misc utilities
+agent_skills/
+  hello-world/   # SKILL.md + scripts/greet.py — worked example, see Agent Skills above
 tests/
   conftest.py              # ScriptedProvider/RaisingProvider fakes shared by the suite
   test_*.py                  # see Tests above

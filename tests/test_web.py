@@ -509,18 +509,35 @@ def test_mega_extreme_mode_skips_propose_skill_confirmation(app_factory, monkeyp
     resp = client.post("/api/chat", json={"message": "add a greet skill"})
 
     assert resp.status_code == 200
-    assert "greet" in [t["name"] for t in client.get("/api/tools").get_json()["tools"]]
+    categories = client.get("/api/tools").get_json()["categories"]
+    names = [t["name"] for cat in categories for t in cat["tools"]]
+    assert "greet" in names
 
 
 def test_tools_endpoint_lists_builtin_tools(app_factory):
     client, _, _ = app_factory([])
-    names = [t["name"] for t in client.get("/api/tools").get_json()["tools"]]
+    categories = client.get("/api/tools").get_json()["categories"]
+    names = [t["name"] for cat in categories for t in cat["tools"]]
     assert "web_search" in names
     assert "run_python" in names
     assert "install_package" in names
     assert "remember" in names
     assert "propose_skill" in names
     assert "cron_add" in names
+
+
+def test_tools_endpoint_groups_by_category_and_flags_confirming_tools(app_factory):
+    client, _, _ = app_factory([])
+    categories = client.get("/api/tools").get_json()["categories"]
+
+    by_name = {t["name"]: t for cat in categories for t in cat["tools"]}
+    assert by_name["run_python"]["confirms"] is True
+    assert by_name["web_search"]["confirms"] is False
+
+    cat_by_tool = {t["name"]: cat["name"] for cat in categories for t in cat["tools"]}
+    assert cat_by_tool["run_python"] == "Documents & Code"
+    assert cat_by_tool["web_search"] == "Web & Browser"
+    assert cat_by_tool["errbook_lookup"] == "Learning suite"
 
 
 def test_cron_endpoint_lists_jobs_added_from_chat(app_factory):

@@ -1,15 +1,21 @@
 from talaria.config import Config
 from talaria.providers.base import Provider, ToolSpec
 from talaria.skills import load_skills
+from talaria.tools.agent_skills import make_agent_skills_tools
 from talaria.tools.browser import make_browser_tools
 from talaria.tools.checkpoint import make_checkpoint_tools
 from talaria.tools.code_exec import Confirmation, make_code_tool, make_install_package_tool
 from talaria.tools.cron import make_cron_tools
 from talaria.tools.delegate import make_delegate_tool
 from talaria.tools.documents import make_document_tools
+from talaria.tools.errbook import make_errbook_tools
+from talaria.tools.feedback_loop import make_feedback_tools
 from talaria.tools.goals import make_goal_tools
+from talaria.tools.idea_lab import make_idea_lab_tools
+from talaria.tools.meaning_cache import make_meaning_cache_tools
 from talaria.tools.memory_tools import make_memory_tools
 from talaria.tools.procedure import make_procedure_tool
+from talaria.tools.shell_exec import make_shell_reset_tool, make_shell_tool
 from talaria.tools.web import make_web_tools
 from talaria.usage import UsageTracker
 
@@ -33,11 +39,27 @@ def build_tools(
         *make_document_tools(config.workspace_dir),
         make_code_tool(config.workspace_dir, confirm),
         make_install_package_tool(config.workspace_dir, confirm),
+        make_shell_tool(config.workspace_dir, confirm),
+        make_shell_reset_tool(config.workspace_dir),
         *make_memory_tools(config.notes_file),
         *make_goal_tools(config.workspace_dir),
         *make_checkpoint_tools(config.workspace_dir),
         *make_cron_tools(config.workspace_dir),
+        # The "learning suite": error signature -> solution recall, an
+        # iteration-loop journal, human feedback aggregation, and a fuzzy
+        # TTL cache for expensive results. Core (not an optional skill) so
+        # every deployment gets them, and so talaria/autonomous.py's
+        # check-in loop can always rely on errbook_lookup/lab_next/
+        # feedback_report existing.
+        *make_errbook_tools(config.workspace_dir),
+        *make_idea_lab_tools(config.workspace_dir),
+        *make_feedback_tools(config.workspace_dir),
+        *make_meaning_cache_tools(config.workspace_dir),
         *load_skills(config.skills_dir),
+        # Anthropic "Agent Skills" (SKILL.md + bundled files) — a separate,
+        # markdown-based format from the ToolSpec plugins above. See
+        # talaria/agent_skills.py.
+        *make_agent_skills_tools(config.agent_skills_dir),
     ]
 
     delegate_tool = make_delegate_tool(
