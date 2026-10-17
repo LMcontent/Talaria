@@ -913,6 +913,23 @@ printed warning rather than failing the whole load.
 
 ### Tools available to the agent
 
+The web UI's sidebar has a **Tools** panel listing every one of these
+(`/api/tools`), grouped into the same categories as the list below —
+collapsed by default and showing just a count, since at ~80 built-in
+tools plus whatever's in `SKILLS_DIR`/`AGENT_SKILLS_DIR` this is
+reference material, not something worth a full scroll on every page
+load. Click a category to expand it; a tool whose full description runs
+long is shown truncated to roughly its first sentence, with the rest a
+hover away. The handful of tools that actually pause and ask for a `y/N`
+confirmation before doing anything (`run_python`, `run_shell`,
+`install_package`, `propose_skill` — see "Streaming and code execution"
+below) carry a small **confirms** badge, so they stand out from the
+rest rather than blending into an alphabetical wall of text. A tool
+Talaria doesn't recognize (any `SKILLS_DIR` skill, including one you
+write yourself) falls into a catch-all **Skills** category rather than
+being dropped — see `talaria/tool_categories.py` if you want to give a
+new core tool a more specific one.
+
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed by default, uses DuckDuckGo HTML; optionally Google's Custom Search API instead, see `GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`). Fast, but can't run JavaScript or interact with a page.
 - `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log`, `browser_reset` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human" below.
 - `read_document`, `write_document`, `edit_document`, `list_files` — read/write/patch `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`; `edit_document` replaces one exact, unique chunk of an existing file instead of resending the whole thing, see above
@@ -1184,6 +1201,7 @@ talaria/
   system_prompt.py                # builds the system prompt for a role (+ memory hint)
   skills.py                         # loads pluggable tools from SKILLS_DIR
   agent_skills.py                     # loads SKILL.md folders from AGENT_SKILLS_DIR
+  tool_categories.py                   # groups tool names for the web UI's Tools panel
   security_review.py                 # model-based review call used by propose_skill
   usage.py                            # session-wide token/cost tracking, optional MAX_SESSION_TOKENS cap
   sandbox.py                           # the dedicated venv run_python/install_package use

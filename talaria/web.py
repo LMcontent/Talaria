@@ -28,6 +28,7 @@ from talaria.memory import clear_history, load_history, save_history
 from talaria.providers import make_provider
 from talaria.roles import DEFAULT_ROLE, ROLES
 from talaria.system_prompt import build_system
+from talaria.tool_categories import CATEGORY_ORDER, CONFIRMING_TOOLS, categorize
 from talaria.tools.cron import load_jobs as load_cron_jobs
 from talaria.tools.registry import build_tools
 from talaria.tools.skill_authoring import make_propose_skill_tool
@@ -137,6 +138,31 @@ INDEX_HTML = r"""<!doctype html>
   .tool-item .tname, .log-item .tname { font-weight: 600; font-family: ui-monospace, monospace; }
   .tool-item .tdesc, .log-item .tdesc { color: #777; margin-top: 2px; line-height: 1.35; }
   .log-item .tname { font-family: inherit; font-weight: 400; color: #555; font-size: 0.9em; }
+
+  /* Collapsed by default: with ~80 built-in tools now, this panel is
+     reference material, not something glanced at every session - the
+     category header (reusing .tool-toggle's rotate-on-expand from the
+     think/tool-call blocks above) gives a count without forcing a scroll
+     through every tool's full description. */
+  .tool-category { margin-bottom: 2px; }
+  .tool-category-header {
+    display: flex; align-items: center; gap: 6px; padding: 5px 2px;
+    cursor: pointer; user-select: none; font-size: 17px; color: #555;
+    border-radius: 6px;
+  }
+  .tool-category-header:hover { background: rgba(0, 0, 0, 0.04); }
+  .tool-category.expanded .tool-toggle { transform: rotate(90deg); }
+  .tool-category-count {
+    margin-left: auto; font-size: 13px; color: #999; background: rgba(0, 0, 0, 0.05);
+    border-radius: 10px; padding: 1px 7px;
+  }
+  .tool-category-body { display: none; padding-left: 14px; }
+  .tool-category.expanded .tool-category-body { display: block; }
+  .confirms-badge {
+    margin-left: 6px; font-size: 11px; font-weight: 600; color: #b45309;
+    background: rgba(180, 83, 9, 0.12); border-radius: 4px; padding: 1px 5px;
+    text-transform: uppercase; letter-spacing: 0.03em; vertical-align: middle;
+  }
 
   .chat-item {
     display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-radius: 6px;
@@ -278,6 +304,10 @@ INDEX_HTML = r"""<!doctype html>
     #role-select, #reset-btn, #open-workspace-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
     .tool-item, .log-item { border-color: #2c2d31; }
     .tool-item .tdesc, .log-item .tdesc { color: #999; }
+    .tool-category-header { color: #aaa; }
+    .tool-category-header:hover { background: rgba(255, 255, 255, 0.06); }
+    .tool-category-count { background: rgba(255, 255, 255, 0.08); color: #888; }
+    .confirms-badge { color: #e8a33d; background: rgba(232, 163, 61, 0.15); }
     #mode-desc { color: #999; }
     .mode-group { border-color: #444; }
     .mode-btn { background: #24262c; color: #ccc; border-color: #444; }
@@ -1218,22 +1248,61 @@ for (const btn of modeBtns) {
   });
 }
 
+// The system-prompt description is often a full paragraph (run_shell's
+// is 500+ chars) - useful for the model, too dense for a sidebar line.
+// Shown truncated to roughly the first sentence; the full text is still
+// one hover away via the item's title attribute.
+function shortToolDesc(desc) {
+  const cut = desc.indexOf(". ");
+  if (cut !== -1 && cut < 100) return desc.slice(0, cut + 1);
+  return desc.length > 100 ? desc.slice(0, 97) + "…" : desc;
+}
+
 async function loadTools() {
   const res = await fetch("/api/tools");
   const data = await res.json();
   toolsList.innerHTML = "";
-  for (const t of data.tools) {
-    const item = document.createElement("div");
-    item.className = "tool-item";
-    const name = document.createElement("div");
-    name.className = "tname";
-    name.textContent = t.name;
-    const desc = document.createElement("div");
-    desc.className = "tdesc";
-    desc.textContent = t.description;
-    item.appendChild(name);
-    item.appendChild(desc);
-    toolsList.appendChild(item);
+  for (const cat of data.categories) {
+    const block = document.createElement("div");
+    block.className = "tool-category";
+
+    const header = document.createElement("div");
+    header.className = "tool-category-header";
+    header.innerHTML =
+      '<span class="tool-toggle">▸</span> ' + cat.name +
+      '<span class="tool-category-count">' + cat.tools.length + "</span>";
+    header.addEventListener("click", () => block.classList.toggle("expanded"));
+
+    const body = document.createElement("div");
+    body.className = "tool-category-body";
+    for (const t of cat.tools) {
+      const item = document.createElement("div");
+      item.className = "tool-item";
+      item.title = t.description;
+
+      const name = document.createElement("div");
+      name.className = "tname";
+      name.textContent = t.name;
+      if (t.confirms) {
+        const badge = document.createElement("span");
+        badge.className = "confirms-badge";
+        badge.textContent = "confirms";
+        badge.title = "Asks for a y/N confirmation in the terminal before it does anything.";
+        name.appendChild(badge);
+      }
+
+      const desc = document.createElement("div");
+      desc.className = "tdesc";
+      desc.textContent = shortToolDesc(t.description);
+
+      item.appendChild(name);
+      item.appendChild(desc);
+      body.appendChild(item);
+    }
+
+    block.appendChild(header);
+    block.appendChild(body);
+    toolsList.appendChild(block);
   }
 }
 loadTools();
@@ -1692,7 +1761,17 @@ def create_app(config: Config) -> Flask:
 
     @app.route("/api/tools")
     def tools_endpoint():
-        return jsonify({"tools": [{"name": t.name, "description": t.description} for t in agent.tools]})
+        # Grouped (and pre-ordered) server-side rather than handing the
+        # web UI a flat list of ~80 tools to make sense of on its own —
+        # see talaria/tool_categories.py for why this lookup lives apart
+        # from ToolSpec itself.
+        by_category: dict[str, list[dict]] = {}
+        for t in agent.tools:
+            by_category.setdefault(categorize(t.name), []).append(
+                {"name": t.name, "description": t.description, "confirms": t.name in CONFIRMING_TOOLS}
+            )
+        categories = [{"name": cat, "tools": by_category[cat]} for cat in CATEGORY_ORDER if cat in by_category]
+        return jsonify({"categories": categories})
 
     @app.route("/api/usage")
     def usage_endpoint():
