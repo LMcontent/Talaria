@@ -5,6 +5,8 @@ def test_known_tools_land_in_their_expected_category():
     assert categorize("web_search") == "Web & Browser"
     assert categorize("run_python") == "Documents & Code"
     assert categorize("run_shell") == "Documents & Code"
+    assert categorize("git_status") == "Git"
+    assert categorize("git_commit") == "Git"
     assert categorize("goal_add") == "Memory & Planning"
     assert categorize("errbook_lookup") == "Learning suite"
     assert categorize("use_skill") == "Agent Skills (SKILL.md)"

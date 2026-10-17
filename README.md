@@ -748,6 +748,39 @@ same as `run_python` already resets every call.
 Excluded from Autonomous mode and cron jobs for the same reason
 `run_python` is (see above) — unattended runs never get either.
 
+### Git (git_status / git_diff / git_commit)
+
+`git clone`, `branch`, `push`, `pull`, `log`, `reset` and everything else
+git-related already just work as plain `run_shell` commands — no
+dedicated tool needed, no quoting hazard either, since they're simple
+one-liners. Commit messages are the one real exception: a message with
+quotes, backticks, `$variables`, or newlines is exactly the kind of thing
+that silently breaks or misbehaves inside a one-line `git commit -m
+"..."` run through a shell. `git_commit` sidesteps that entirely — the
+message is written to a temp file and passed via `git commit -F <file>`,
+never interpolated into a command string at all, so it survives intact
+whatever's in it. `git_status`/`git_diff` are there alongside it mostly
+for convenience (the right flags — `--short --branch
+--untracked-files=all`, `--staged` — already applied, and diff output is
+truncated the same way `run_shell`'s is for a huge one) rather than
+necessity.
+
+**Not a general git CLI wrapper, deliberately** — these three build their
+command as an argv list (`subprocess.run(["git", ...])`), never through a
+shell, so unlike `run_shell` there's no shell-injection surface here at
+all; everything else git-related stays on `run_shell`. **No confirmation
+gate**, unlike `run_python`/`run_shell`/`install_package`: these are
+fixed, non-arbitrary git subcommands rather than arbitrary model-written
+code running with OS permissions, `git_status`/`git_diff` are read-only,
+and a bad `git_commit` is no riskier than a bad `write_document` — easy
+to undo with another commit. Available in Autonomous mode/cron for the
+same reason `write_document`/`goal_update` are.
+
+All three operate on whatever directory `run_shell`'s own `cd`/`shell_reset`
+last left things in (see above) — `cd myrepo` via `run_shell`, then
+`git_status` is already scoped to `myrepo`, no separate path argument
+needed unless you want one.
+
 ### Usage / session token limit
 
 Talaria counts tokens (input + output) across the whole session, including
@@ -936,6 +969,7 @@ new core tool a more specific one.
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
 - `run_shell`, `shell_reset` — run an actual shell command (git, build tools, test runners — anything run_python's 15s Python-only sandbox can't handle), working directory persists across calls; same confirmation gate as run_python, see above
+- `git_status`, `git_diff`, `git_commit` — human-friendly wrappers around the one git operation genuinely risky through a raw shell string (a commit message, written via a temp file so quoting is never a hazard) plus two read-only conveniences; no confirmation gate, everything else git-related stays on run_shell, see above
 - `remember`, `recall`, `forget` — long-term memory across sessions, see above
 - `goal_add`, `goal_update`, `goal_list`, `goal_focus` — the persistent goal tree, see Goals above
 - `checkpoint_save`, `checkpoint_restore`, `checkpoint_list`, `checkpoint_discard` — snapshot/restore persistent state, see Checkpoints above
@@ -1219,7 +1253,7 @@ talaria/
     openai_compat.py          # OpenAI-compatible router backend (streams responses)
     dns_pin.py                  # optional DNS pinning for blocked regions
   tools/
-    web.py, browser.py, documents.py, code_exec.py, shell_exec.py, memory_tools.py,
+    web.py, browser.py, documents.py, code_exec.py, shell_exec.py, git_tools.py, memory_tools.py,
     goals.py, cron.py, checkpoint.py, delegate.py, procedure.py,
     skill_authoring.py, registry.py, confirmation.py, state_lock.py,
     errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py,   # the "learning suite" — see above

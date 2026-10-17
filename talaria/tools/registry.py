@@ -10,6 +10,7 @@ from talaria.tools.delegate import make_delegate_tool
 from talaria.tools.documents import make_document_tools
 from talaria.tools.errbook import make_errbook_tools
 from talaria.tools.feedback_loop import make_feedback_tools
+from talaria.tools.git_tools import make_git_tools
 from talaria.tools.goals import make_goal_tools
 from talaria.tools.idea_lab import make_idea_lab_tools
 from talaria.tools.meaning_cache import make_meaning_cache_tools
@@ -41,6 +42,7 @@ def build_tools(
         make_install_package_tool(config.workspace_dir, confirm),
         make_shell_tool(config.workspace_dir, confirm),
         make_shell_reset_tool(config.workspace_dir),
+        *make_git_tools(config.workspace_dir),
         *make_memory_tools(config.notes_file),
         *make_goal_tools(config.workspace_dir),
         *make_checkpoint_tools(config.workspace_dir),
