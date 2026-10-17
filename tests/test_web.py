@@ -73,6 +73,26 @@ def app_factory_with_provider(tmp_path, monkeypatch):
     return build
 
 
+def test_alt_provider_info_picks_the_inactive_backend(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    cfg = make_config(tmp_path / "a", provider="claude", claude_api_key="x", openai_compat_api_key="y", openai_compat_model="m")
+    assert web._alt_provider_info(cfg) == ("openai_compat", "m")
+
+    cfg = make_config(tmp_path / "b", provider="openai_compat", openai_compat_api_key="y", claude_api_key="x", claude_model="m")
+    assert web._alt_provider_info(cfg) == ("claude", "m")
+
+
+def test_alt_provider_info_is_none_without_credentials(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    cfg = make_config(tmp_path / "a", provider="claude", claude_api_key="x", openai_compat_api_key=None)
+    assert web._alt_provider_info(cfg) == (None, None)
+
+    cfg = make_config(tmp_path / "b", provider="openai_compat", openai_compat_api_key="y", claude_api_key=None)
+    assert web._alt_provider_info(cfg) == (None, None)
+
+
 def test_index_page_loads(app_factory):
     client, _, _ = app_factory([])
     resp = client.get("/")
@@ -92,6 +112,37 @@ def test_index_page_shows_claude_model_when_that_provider_is_active(app_factory)
     client, _, _ = app_factory([], provider="claude", claude_model="claude-opus-5")
     resp = client.get("/")
     body = resp.get_data(as_text=True)
+    assert "claude-opus-5" in body
+
+
+def test_index_page_shows_the_other_provider_when_it_has_credentials(app_factory):
+    client, _, _ = app_factory(
+        [], provider="claude", claude_model="claude-opus-5",
+        claude_api_key="sk-ant-test", openai_compat_api_key="or-test", openai_compat_model="gpt-5.6-luna",
+    )
+    body = client.get("/").get_data(as_text=True)
+    assert "also configured" in body
+    assert "openai_compat" in body
+    assert "gpt-5.6-luna" in body
+
+
+def test_index_page_hides_the_other_provider_without_credentials(app_factory):
+    client, _, _ = app_factory(
+        [], provider="claude", claude_model="claude-opus-5",
+        claude_api_key="sk-ant-test", openai_compat_api_key=None,
+    )
+    body = client.get("/").get_data(as_text=True)
+    assert "also configured" not in body
+
+
+def test_index_page_shows_claude_as_the_other_provider_when_openai_compat_is_active(app_factory):
+    client, _, _ = app_factory(
+        [], provider="openai_compat", openai_compat_model="gpt-5.6-luna", openai_compat_api_key="or-test",
+        claude_api_key="sk-ant-test", claude_model="claude-opus-5",
+    )
+    body = client.get("/").get_data(as_text=True)
+    assert "also configured" in body
+    assert "claude" in body
     assert "claude-opus-5" in body
 
 

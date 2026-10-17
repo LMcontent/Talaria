@@ -66,6 +66,21 @@ def _load_logo_data_uri() -> str:
         return ""
 
 
+def _alt_provider_info(config: Config) -> tuple[str | None, str | None]:
+    """The OTHER backend's name/model, for the sidebar's informational
+    "also configured" line - or (None, None) if it has no credentials
+    set, so the UI never claims something's usable when it isn't.
+    Config always loads both claude_* and openai_compat_* fields
+    regardless of which LLM_PROVIDER is active (see talaria/config.py),
+    so this is just picking out whichever one ISN'T config.provider."""
+    if config.provider == "claude":
+        if config.openai_compat_api_key:
+            return "openai_compat", config.openai_compat_model
+    elif config.claude_api_key:
+        return "claude", config.claude_model
+    return None, None
+
+
 WEB_MEDIA_HINT = (
     "\n\nThis is the web chat UI, which renders Markdown images and "
     "videos inline. When you create or already have an image/video file "
@@ -99,7 +114,15 @@ INDEX_HTML = r"""<!doctype html>
      text this size. */
   .brand-logo { display: block; height: 17px; width: auto; flex-shrink: 0; }
   #sidebar h1 { font-size: 24px; margin: 0 0 2px; }
-  #sidebar .meta { font-size: 18px; color: #666; margin-bottom: 18px; }
+  .meta-block { margin-bottom: 18px; }
+  #sidebar .meta { font-size: 18px; color: #666; }
+  /* The OTHER configured backend (see talaria/config.py — Config always
+     loads both claude_* and openai_compat_* fields regardless of which
+     LLM_PROVIDER is active) — purely informational, shown only when it
+     actually has credentials set, not just defaulted; switching which
+     one is active needs LLM_PROVIDER in .env + a restart, no live
+     toggle here (unlike Safe/Extreme). */
+  .meta-alt { font-size: 14.5px; color: #999; margin-top: 2px; }
   .sidebar-section { margin-bottom: 18px; }
   .sidebar-section-title {
     font-size: 16.5px; text-transform: uppercase; letter-spacing: 0.04em;
@@ -300,6 +323,7 @@ INDEX_HTML = r"""<!doctype html>
     body { background: #17181c; color: #e6e6e6; }
     #sidebar { background: #1b1c20; border-color: #2c2d31; }
     #sidebar .meta { color: #999; }
+    .meta-alt { color: #777; }
     .sidebar-section-title { color: #888; }
     #role-select, #reset-btn, #open-workspace-btn { background: #24262c; color: #e6e6e6; border-color: #444; }
     .tool-item, .log-item { border-color: #2c2d31; }
@@ -342,7 +366,12 @@ INDEX_HTML = r"""<!doctype html>
     <img class="brand-logo" src="{{ logo_src }}" alt="">
     <h1>Talaria</h1>
   </div>
-  <div class="meta">provider: {{ provider_name }} &middot; model: {{ model_name }}</div>
+  <div class="meta-block">
+    <div class="meta">provider: {{ provider_name }} &middot; model: {{ model_name }}</div>
+    {% if alt_provider_name %}
+    <div class="meta-alt" title="Configured but not active — set LLM_PROVIDER in .env and restart to switch to it.">also configured: {{ alt_provider_name }} &middot; {{ alt_model_name }}</div>
+    {% endif %}
+  </div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">
       Chats
@@ -1420,10 +1449,13 @@ def create_app(config: Config) -> Flask:
         model_name = (
             config.claude_model if config.provider == "claude" else config.openai_compat_model
         )
+        alt_provider_name, alt_model_name = _alt_provider_info(config)
         return render_template_string(
             INDEX_HTML,
             provider_name=config.provider,
             model_name=model_name,
+            alt_provider_name=alt_provider_name,
+            alt_model_name=alt_model_name,
             role=state["role"],
             roles=ROLES,
             logo_src=_load_logo_data_uri(),
