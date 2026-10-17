@@ -30,7 +30,7 @@ from talaria.workspace_log import append_log
 # browser_state/browser_scroll/browser_back/browser_screenshot) is fine,
 # same as web_fetch always having been.
 EXCLUDED_TOOLS = {
-    "run_python", "install_package", "propose_skill", "delegate_task", "run_procedure",
+    "run_python", "run_shell", "install_package", "propose_skill", "delegate_task", "run_procedure",
     "browser_click", "browser_type",
 }
 

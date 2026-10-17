@@ -60,6 +60,48 @@ def write_document(workspace_dir: str, path: str, content: str) -> str:
     return f"Wrote {len(content)} chars to {path}"
 
 
+def edit_document(
+    workspace_dir: str, path: str, old_text: str = "", new_text: str = "", replace_all: str = "false"
+) -> str:
+    """Replace old_text with new_text inside an existing workspace file,
+    without the caller resending the whole file — the point being to
+    avoid both the token cost and the "accidentally dropped a chunk of
+    the file while retyping it" risk that comes with write_document for
+    anything beyond a small file. old_text must match the file's
+    current content exactly (including whitespace) and, unless
+    replace_all, occur exactly once — ambiguous or missing matches are
+    refused rather than guessed at."""
+    try:
+        full_path = resolve_path(workspace_dir, path)
+    except WorkspaceError as e:
+        return f"Error: {e}"
+
+    if not os.path.isfile(full_path):
+        return f"Error: file not found: {path}"
+    if not old_text:
+        return "Error: 'old_text' must be non-empty (use write_document to create a new file)."
+    all_occurrences = str(replace_all).strip().lower() in ("1", "true", "yes", "on")
+
+    with open(full_path, encoding="utf-8") as f:
+        content = f.read()
+
+    count = content.count(old_text)
+    if count == 0:
+        return f"Error: old_text not found in {path} (it must match exactly, including whitespace)."
+    if count > 1 and not all_occurrences:
+        return (
+            f"Error: old_text occurs {count} times in {path} - make it unique with more "
+            "surrounding context, or pass replace_all=true to replace every occurrence."
+        )
+
+    new_content = content.replace(old_text, new_text) if all_occurrences else content.replace(old_text, new_text, 1)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+
+    times = f"{count} occurrences" if all_occurrences and count > 1 else "1 occurrence"
+    return f"Replaced {times} in {path} ({len(new_content)} chars now)."
+
+
 def list_files(workspace_dir: str, subdir: str = ".") -> str:
     """List files inside a workspace directory."""
     try:
@@ -102,6 +144,29 @@ def make_document_tools(workspace_dir: str) -> list[ToolSpec]:
                 "required": ["path", "content"],
             },
             handler=lambda path, content: write_document(workspace_dir, path, content),
+        ),
+        ToolSpec(
+            name="edit_document",
+            description=(
+                "Replace one exact occurrence of old_text with new_text in an existing "
+                "workspace file, without resending the whole file - prefer this over "
+                "write_document for anything beyond a small file or a full rewrite. "
+                "old_text must match the file's current content exactly (whitespace "
+                "included) and occur exactly once unless replace_all is set."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to the workspace."},
+                    "old_text": {"type": "string", "description": "Exact text to find (must be unique unless replace_all)."},
+                    "new_text": {"type": "string", "description": "Text to replace it with (empty string deletes old_text)."},
+                    "replace_all": {"type": "string", "description": "'true' to replace every occurrence instead of requiring exactly one (default 'false')."},
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+            handler=lambda path, old_text="", new_text="", replace_all="false": edit_document(
+                workspace_dir, path, old_text, new_text, replace_all
+            ),
         ),
         ToolSpec(
             name="list_files",

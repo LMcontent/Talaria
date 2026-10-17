@@ -204,7 +204,7 @@ it, this is just so "it behaves differently in Docker" isn't a mystery:
   Dockerfile than to weaken it for every user just to suit a container
   default.
 
-`run_python`/`install_package` confirmation prompts and `propose_skill`'s
+`run_python`/`run_shell`/`install_package` confirmation prompts and `propose_skill`'s
 security-review gate work exactly like the non-Docker setup — they print
 to **this container's own logs** (`docker compose logs -f web`), not the
 browser, same as "the terminal running the server" everywhere else in
@@ -350,7 +350,7 @@ actually cancels the in-flight request to the model, not just the display:
 the partial reply is what gets saved to history, and a "(generation
 stopped)" note is shown so it's clear it wasn't a complete answer.
 
-**Important:** confirmation prompts for `run_python`, `install_package`,
+**Important:** confirmation prompts for `run_python`, `run_shell`, `install_package`,
 and `propose_skill` still appear in the **terminal window running the server**, not in the
 browser — a chat message will just sit there "thinking…" until you answer
 in that terminal. This keeps the same safety guarantees as the CLI without
@@ -359,9 +359,9 @@ actually see, it just isn't in the browser tab).
 
 `WEB_HOST` defaults to `127.0.0.1` (localhost only) — leave it that way
 unless you specifically intend to expose this on your network. Anyone who
-can reach this port can chat with the agent, including its `run_python`
-tool (which still asks for approval in your terminal, but is still not
-something you want strangers triggering).
+can reach this port can chat with the agent, including its `run_python`/
+`run_shell` tools (which still ask for approval in your terminal, but are
+still not something you want strangers triggering).
 
 ## Memory & long-running work
 
@@ -425,9 +425,9 @@ open: a goal tree nobody ever checks between sessions doesn't do
 anything by itself. Stop the process (or set `AUTONOMOUS_MODE=false`) to
 turn it back off.
 
-**Unattended runs never get `run_python`, `install_package`,
+**Unattended runs never get `run_python`, `run_shell`, `install_package`,
 `propose_skill`, `delegate_task`, `run_procedure`, `browser_click`, or
-`browser_type`.** The code/package/skill tools execute with your OS-level
+`browser_type`.** The code/shell/package/skill tools execute with your OS-level
 permissions and normally ask for a `y/N` confirmation in the terminal,
 which has no one to answer it when nothing is watching; `delegate_task`
 and `run_procedure` are excluded for a different reason — both build
@@ -503,9 +503,9 @@ worth revisiting if that turns out to matter. Whichever process is up
 checks once every 30 seconds for jobs that are due.
 
 Same restrictions as autonomous mode, and for the same reason: a cron
-firing is unattended, so it never gets `run_python`, `install_package`,
-`propose_skill`, `delegate_task`, `run_procedure`, `browser_click`, or
-`browser_type`. Each firing is a fresh, short-lived agent call (not the
+firing is unattended, so it never gets `run_python`, `run_shell`,
+`install_package`, `propose_skill`, `delegate_task`, `run_procedure`,
+`browser_click`, or `browser_type`. Each firing is a fresh, short-lived agent call (not the
 web UI/CLI's own conversation) and is logged to
 `WORKSPACE_DIR/.cron_log.json`, printed to the terminal, and shown in the
 web UI sidebar's "Cron jobs" section alongside each job's schedule and
@@ -580,19 +580,20 @@ the model has to decide to call it.
 Responses are streamed to the terminal as they're generated (for both
 providers), instead of waiting for the full answer.
 
-`run_python` asks for a `y/N` confirmation in the terminal before actually
-running any code the model generated — the code runs with your OS-level
-permissions, so review it before approving. Set `CONFIRM_CODE_EXEC=false`
-in `.env` to skip the prompt (only if you fully trust the model/provider).
+`run_python` and `run_shell` both ask for a `y/N` confirmation in the
+terminal before actually running any code/command the model generated —
+both run with your OS-level permissions, so review before approving. Set
+`CONFIRM_CODE_EXEC=false` in `.env` to skip the prompt for both (only if
+you fully trust the model/provider).
 
 In the web UI, the sidebar's **Settings** control is a three-way
 Safe / Extreme / Mega Extreme switch, overriding `CONFIRM_CODE_EXEC` live
 for the running session (no restart needed, takes effect on the very next
 tool call):
 
-- **Safe** (default): `run_python`/`install_package` ask for `y/N`
+- **Safe** (default): `run_python`/`run_shell`/`install_package` ask for `y/N`
   confirmation, same as the CLI.
-- **Extreme**: those two execute immediately, no prompt.
+- **Extreme**: those three execute immediately, no prompt.
 - **Mega Extreme**: Extreme, plus `propose_skill` also saves and loads a
   new skill with no confirmation — including one the automatic security
   review flagged **RISKY**. `propose_skill`'s confirmation is otherwise a
@@ -632,7 +633,7 @@ call's latency serially now only pays for the slowest one. All the pending
 tool-call panels appear up front, in request order, then fill in with
 their results as each one actually finishes — which, since they're
 running in parallel, isn't necessarily the same order they were announced
-in. The interactive `run_python`/`install_package`/`propose_skill`
+in. The interactive `run_python`/`run_shell`/`install_package`/`propose_skill`
 confirmation prompt and the small JSON-backed state files (`remember`,
 goals, cron jobs, checkpoints) stay safe under this: concurrent
 confirmation prompts queue up one at a time in the terminal instead of
@@ -719,6 +720,33 @@ boundary you'd want a container (e.g. Docker), which Talaria doesn't set
 up for you.
 
 Check what's installed anytime with `/venv` in the CLI.
+
+### Shell access (run_shell)
+
+`run_python`'s sandbox is deliberately narrow: a 15-second timeout and a
+fresh subprocess on every call, fine for a quick snippet but useless for
+`git clone`, a real test suite, or any build/package-manager command that
+takes longer or needs actual shell semantics (pipes, `&&`, globbing).
+`run_shell` covers that gap — plain `bash`, default 120s timeout
+(`timeout_seconds` raises it, capped at 600), same `y/N` confirmation gate
+and `CONFIRM_CODE_EXEC`/Safe-Extreme-Mega-Extreme wiring as `run_python`.
+
+**Unlike `run_python`, it is NOT routed through the sandbox venv** —
+there's no package isolation to speak of here, it's just a shell in
+`WORKSPACE_DIR` (or wherever a previous `cd` left it) with Talaria's own
+OS-level permissions, the same no-sandbox-against-a-malicious-model
+caveat as above. The working directory is the one thing that persists
+across calls within a run (`cd project && npm install` in one call, then
+plain `npm test` in the next, without repeating the `cd`) — not a live
+interactive process, no backgrounded dev server, no environment
+variables surviving between calls. `shell_reset` (no confirmation needed,
+it doesn't run anything) snaps it back to the workspace root. A fresh
+process — a new CLI/web session, a new autonomous tick, a fresh
+`delegate_task` sub-agent — always starts back at the workspace root,
+same as `run_python` already resets every call.
+
+Excluded from Autonomous mode and cron jobs for the same reason
+`run_python` is (see above) — unattended runs never get either.
 
 ### Usage / session token limit
 
@@ -828,8 +856,8 @@ the top-level agent — a `delegate_task` sub-agent can't call it, so new
 tools can't be added without you seeing it happen.
 
 This confirmation is independent of the CLI's `CONFIRM_CODE_EXEC` and the
-web UI's Safe/Extreme mode (both scoped to `run_python`/`install_package`
-only) — it always asks, in either mode, since permanently adding a new
+web UI's Safe/Extreme mode (both scoped to `run_python`/`run_shell`/
+`install_package` only) — it always asks, in either mode, since permanently adding a new
 capability the agent can call forever is a bigger decision than one
 `run_python` call. The one exception is the web UI's **Mega Extreme**
 mode (see "Streaming and code execution" above), which skips this gate
@@ -858,7 +886,7 @@ skills**, not a second copy of the same idea: a `SKILLS_DIR` skill is
 Python defining a `TOOLS` list, loaded as one new callable tool per
 entry; a `SKILL.md` is markdown with no code of its own — the model reads
 it and carries out the instructions using tools it already has
-(`run_python`, `read_document`/`write_document`, ...). That also means
+(`run_python`/`run_shell`, `read_document`/`write_document`, ...). That also means
 Talaria never executes anything from inside a `SKILL.md` directly; it
 only ever hands the model text to read.
 
@@ -887,9 +915,10 @@ printed warning rather than failing the whole load.
 
 - `web_search`, `web_fetch` — search the internet and read pages via plain HTTP (no API key needed by default, uses DuckDuckGo HTML; optionally Google's Custom Search API instead, see `GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`). Fast, but can't run JavaScript or interact with a page.
 - `browser_open`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_state`, `browser_screenshot`, `browser_network_log`, `browser_reset` — a real, persistent Chromium session (via Playwright) for anything `web_fetch` can't handle: JS-rendered pages, multi-step flows, sites behind a login, and data (like a price) that only exists in an API call the page made, not in its own HTML. See "Browsing like a human" below.
-- `read_document`, `write_document`, `list_files` — read/write `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`
+- `read_document`, `write_document`, `edit_document`, `list_files` — read/write/patch `.txt`/`.pdf`/`.docx` files, sandboxed to `WORKSPACE_DIR`; `edit_document` replaces one exact, unique chunk of an existing file instead of resending the whole thing, see above
 - `run_python` — execute a Python snippet in the dedicated sandbox venv and capture its output (isolates installed packages, not the OS — only use with a model/provider you trust; asks for confirmation first, see above)
 - `install_package` — pip-install something into that sandbox venv so run_python can use it; same confirmation gate
+- `run_shell`, `shell_reset` — run an actual shell command (git, build tools, test runners — anything run_python's 15s Python-only sandbox can't handle), working directory persists across calls; same confirmation gate as run_python, see above
 - `remember`, `recall`, `forget` — long-term memory across sessions, see above
 - `goal_add`, `goal_update`, `goal_list`, `goal_focus` — the persistent goal tree, see Goals above
 - `checkpoint_save`, `checkpoint_restore`, `checkpoint_list`, `checkpoint_discard` — snapshot/restore persistent state, see Checkpoints above
@@ -1172,7 +1201,7 @@ talaria/
     openai_compat.py          # OpenAI-compatible router backend (streams responses)
     dns_pin.py                  # optional DNS pinning for blocked regions
   tools/
-    web.py, browser.py, documents.py, code_exec.py, memory_tools.py,
+    web.py, browser.py, documents.py, code_exec.py, shell_exec.py, memory_tools.py,
     goals.py, cron.py, checkpoint.py, delegate.py, procedure.py,
     skill_authoring.py, registry.py, confirmation.py, state_lock.py,
     errbook.py, idea_lab.py, feedback_loop.py, meaning_cache.py,   # the "learning suite" — see above

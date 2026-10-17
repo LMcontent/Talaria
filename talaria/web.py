@@ -330,12 +330,12 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">Settings</div>
-    <div class="mode-group" title="Confirmations for run_python / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.">
+    <div class="mode-group" title="Confirmations for run_python / run_shell / install_package / propose_skill appear in the TERMINAL running this server, not here — check there if a message seems to hang.">
       <button type="button" class="mode-btn" data-mode="safe">Safe</button>
       <button type="button" class="mode-btn" data-mode="extreme">Extreme</button>
       <button type="button" class="mode-btn" data-mode="mega">Mega Extreme</button>
     </div>
-    <div id="mode-desc" class="tdesc">run_python / install_package ask for confirmation in the terminal.</div>
+    <div id="mode-desc" class="tdesc">run_python / run_shell / install_package ask for confirmation in the terminal.</div>
   </div>
   <div class="sidebar-section">
     <button id="reset-btn" type="button" title="Clears this chat's messages without deleting the chat itself">Clear this chat</button>
@@ -1159,9 +1159,9 @@ cronRefresh.addEventListener("click", (e) => {
 });
 
 const MODE_DESCRIPTIONS = {
-  safe: "run_python / install_package ask for confirmation in the terminal.",
-  extreme: "run_python / install_package execute immediately — no confirmation prompt.",
-  mega: "run_python / install_package / propose_skill all execute immediately — " +
+  safe: "run_python / run_shell / install_package ask for confirmation in the terminal.",
+  extreme: "run_python / run_shell / install_package execute immediately — no confirmation prompt.",
+  mega: "run_python / run_shell / install_package / propose_skill all execute immediately — " +
     "no confirmation prompt, even for a skill the security review flagged risky.",
 };
 
@@ -1316,8 +1316,8 @@ def create_app(config: Config) -> Flask:
             config.max_history_turns,
         ),
         "cancel_event": None,
-        # Safe (default, from .env): run_python/install_package ask for a
-        # y/N confirmation in the terminal. Extreme: that prompt is
+        # Safe (default, from .env): run_python/run_shell/install_package
+        # ask for a y/N confirmation in the terminal. Extreme: that prompt is
         # skipped. Mega Extreme: propose_skill's own separate confirmation
         # (including its harder RISKY-verdict gate) is skipped too — that
         # one was never tied to Safe/Extreme, since permanently adding a
@@ -1712,7 +1712,7 @@ def main() -> None:
 
     print(f"Talaria web UI ready at http://{config.web_host}:{config.web_port}  (Ctrl+C to stop)")
     print(
-        "Confirmations for run_python / install_package / propose_skill appear "
+        "Confirmations for run_python / run_shell / install_package / propose_skill appear "
         "HERE in this terminal, not in the browser — check back here if a chat message "
         "seems to hang."
     )

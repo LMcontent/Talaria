@@ -15,6 +15,7 @@ from talaria.tools.idea_lab import make_idea_lab_tools
 from talaria.tools.meaning_cache import make_meaning_cache_tools
 from talaria.tools.memory_tools import make_memory_tools
 from talaria.tools.procedure import make_procedure_tool
+from talaria.tools.shell_exec import make_shell_reset_tool, make_shell_tool
 from talaria.tools.web import make_web_tools
 from talaria.usage import UsageTracker
 
@@ -38,6 +39,8 @@ def build_tools(
         *make_document_tools(config.workspace_dir),
         make_code_tool(config.workspace_dir, confirm),
         make_install_package_tool(config.workspace_dir, confirm),
+        make_shell_tool(config.workspace_dir, confirm),
+        make_shell_reset_tool(config.workspace_dir),
         *make_memory_tools(config.notes_file),
         *make_goal_tools(config.workspace_dir),
         *make_checkpoint_tools(config.workspace_dir),
