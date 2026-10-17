@@ -45,6 +45,17 @@ _CWD_MARKER = "\x01TALARIA_CWD\x01"
 _cwd_by_workspace: dict[str, str] = {}
 
 
+def tracked_dir(workspace_dir: str) -> str:
+    """The directory run_shell currently operates in for this workspace
+    - starts at workspace_dir, moves on a `cd` in run_shell, resets via
+    shell_reset. Exposed so other tools (talaria/tools/git_tools.py) can
+    share the same "current directory" a model just `cd`-ed into, rather
+    than each one tracking its own notion of where it is."""
+    base = os.path.realpath(workspace_dir)
+    current = _cwd_by_workspace.get(base, base)
+    return current if os.path.isdir(current) else base
+
+
 def run_shell(
     workspace_dir: str, command: str = "", timeout_seconds: str = "", require_confirmation: Confirmation = True
 ) -> str:
@@ -79,9 +90,7 @@ def run_shell(
 
     base = os.path.realpath(workspace_dir)
     os.makedirs(base, exist_ok=True)
-    start_dir = _cwd_by_workspace.get(base, base)
-    if not os.path.isdir(start_dir):
-        start_dir = base
+    start_dir = tracked_dir(workspace_dir)
 
     # The command runs as its own line(s) in a script rather than being
     # spliced into a one-liner, so nothing about its own quoting/braces

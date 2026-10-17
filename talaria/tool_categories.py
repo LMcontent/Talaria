@@ -11,6 +11,7 @@ or erroring.
 CATEGORY_ORDER = [
     "Web & Browser",
     "Documents & Code",
+    "Git",
     "Memory & Planning",
     "Learning suite",
     "Agent Skills (SKILL.md)",
@@ -38,6 +39,9 @@ _CATEGORY_BY_NAME = {
     "install_package": "Documents & Code",
     "run_shell": "Documents & Code",
     "shell_reset": "Documents & Code",
+    "git_status": "Git",
+    "git_diff": "Git",
+    "git_commit": "Git",
     "remember": "Memory & Planning",
     "recall": "Memory & Planning",
     "forget": "Memory & Planning",
